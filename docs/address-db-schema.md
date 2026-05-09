@@ -126,6 +126,8 @@ python -m pip install -e ".[dev,postgis]"
 The PostGIS schema adds:
 
 - `legal_dong_codes`: data.go.kr/code.go.kr legal-dong code master table.
+- `legal_dong_code_aliases`: source-specific aliases that point to CSV master
+  codes without adding non-master codes to `legal_dong_codes`.
 - `legal_dong_boundaries`: SHP boundary table with `geom MULTIPOLYGON(5179)`.
 - `legal_dong_boundary_mapping_issues`: view for missing/inactive source codes.
 
@@ -136,10 +138,20 @@ legal_dong_boundaries.legal_dong_code
   -> legal_dong_codes.legal_dong_code
 ```
 
-`legal_dong_boundaries.legal_dong_code` is nullable by design. The source SHP
-code remains in `source_code`, and rows that cannot be mapped are marked with
-`mapping_status`. This keeps the FK valid while preserving provider mismatch
-evidence for review.
+CSV is the master. For example, VWorld/N3A uses `3600000000` for the Sejong
+sido boundary, but code.go.kr/data.go.kr legal-dong master uses `3611000000`.
+The loader resolves that through `legal_dong_code_aliases`:
+
+```text
+source_system=vworld_n3a
+source_layer=sido
+source_code=3600000000
+legal_dong_code=3611000000
+```
+
+The source SHP code remains in `source_code`, and rows that cannot be mapped
+are marked with `mapping_status`. Alias-mapped rows keep valid FK integrity
+without polluting the CSV-master table.
 
 Bulk-load choices:
 
@@ -150,6 +162,9 @@ Bulk-load choices:
 
 See `docs/legal-dong-postgis-report.md` for the WSL2 command sequence and the
 validated `tripmate` dataset mismatch report.
+
+See `docs/geocoding-readiness.md` for what the current DB can and cannot do for
+forward geocoding and reverse geocoding.
 
 ### `road_name_addresses`
 

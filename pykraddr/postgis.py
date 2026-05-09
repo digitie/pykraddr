@@ -28,12 +28,14 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine, RowMapping
 
 from .legal_dong import iter_legal_dong_records
 from .models import LegalDongRecord
 
 LEGAL_DONG_TABLE = "legal_dong_codes"
+LEGAL_DONG_ALIAS_TABLE = "legal_dong_code_aliases"
 LEGAL_DONG_BOUNDARY_TABLE = "legal_dong_boundaries"
 LEGAL_DONG_BOUNDARY_ISSUES_VIEW = "legal_dong_boundary_mapping_issues"
 LEGAL_DONG_COPY_COLUMNS = (
@@ -49,6 +51,16 @@ LEGAL_DONG_COPY_COLUMNS = (
     "legal_dong_level",
     "source",
     "loaded_at",
+)
+DEFAULT_LEGAL_DONG_ALIASES = (
+    {
+        "source_system": "vworld_n3a",
+        "source_layer": "sido",
+        "source_code": "3600000000",
+        "source_name": "Sejong Special Self-Governing City",
+        "legal_dong_code": "3611000000",
+        "reason": "VWorld/N3A sido boundary code differs from code.go.kr legal-dong master.",
+    },
 )
 BOUNDARY_CODE_COLUMN_CANDIDATES = (
     "BJCD",
@@ -70,6 +82,7 @@ class BoundaryLoadResult:
 
     loaded: int = 0
     matched: int = 0
+    alias_mapped: int = 0
     missing: int = 0
     inactive: int = 0
     files: tuple[str, ...] = ()
@@ -87,6 +100,7 @@ class PostGISLegalDongStore:
     engine: Engine = field(init=False)
     metadata: MetaData = field(init=False)
     legal_dong_table: Table = field(init=False)
+    alias_table: Table = field(init=False)
     boundary_table: Table = field(init=False)
 
     def __post_init__(self) -> None:
@@ -96,6 +110,7 @@ class PostGISLegalDongStore:
             self.engine = create_engine(self.url_or_engine, future=True, echo=self.echo)
         self.metadata = make_postgis_metadata(schema=self.schema, srid=self.srid)
         self.legal_dong_table = self.metadata.tables[_table_key(LEGAL_DONG_TABLE, self.schema)]
+        self.alias_table = self.metadata.tables[_table_key(LEGAL_DONG_ALIAS_TABLE, self.schema)]
         self.boundary_table = self.metadata.tables[
             _table_key(LEGAL_DONG_BOUNDARY_TABLE, self.schema)
         ]
@@ -116,6 +131,47 @@ class PostGISLegalDongStore:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
         self.metadata.create_all(self.engine)
         self.create_mapping_issues_view()
+
+    def reset(self, *, recreate: bool = False) -> None:
+        """Reset PostGIS legal-dong tables.
+
+        ``recreate=True`` drops the configured schema first, which is the most
+        reliable path for full validation runs after schema changes.
+        """
+
+        if recreate:
+            with self.engine.begin() as connection:
+                if self.schema and self.schema != "public":
+                    connection.execute(
+                        text(f"DROP SCHEMA IF EXISTS {_quote_ident(self.schema)} CASCADE")
+                    )
+                else:
+                    connection.execute(
+                        text(
+                            "DROP VIEW IF EXISTS "
+                            f"{_qualified_name(LEGAL_DONG_BOUNDARY_ISSUES_VIEW, self.schema)}"
+                        )
+                    )
+                    for name in (
+                        LEGAL_DONG_BOUNDARY_TABLE,
+                        LEGAL_DONG_ALIAS_TABLE,
+                        LEGAL_DONG_TABLE,
+                    ):
+                        table_name = _qualified_name(name, self.schema)
+                        connection.execute(
+                            text(f"DROP TABLE IF EXISTS {table_name} CASCADE")
+                        )
+            self.create_schema()
+            return
+        with self.engine.begin() as connection:
+            connection.execute(
+                text(
+                    "TRUNCATE TABLE "
+                    f"{_qualified_name(LEGAL_DONG_BOUNDARY_TABLE, self.schema)}, "
+                    f"{_qualified_name(LEGAL_DONG_ALIAS_TABLE, self.schema)}, "
+                    f"{_qualified_name(LEGAL_DONG_TABLE, self.schema)} CASCADE"
+                )
+            )
 
     def create_mapping_issues_view(self) -> None:
         boundary = _qualified_name(LEGAL_DONG_BOUNDARY_TABLE, self.schema)
@@ -142,7 +198,7 @@ class PostGISLegalDongStore:
                       ON b.legal_dong_code = c.legal_dong_code
                     WHERE b.legal_dong_code IS NULL
                        OR c.is_active IS NOT TRUE
-                       OR b.mapping_status <> 'matched'
+                       OR b.mapping_status NOT IN ('matched', 'alias_mapped')
                     """
                 )
             )
@@ -155,6 +211,7 @@ class PostGISLegalDongStore:
         replace: bool = True,
         batch_size: int = 10_000,
         use_copy: bool = True,
+        load_default_aliases: bool = True,
     ) -> int:
         records = iter_legal_dong_records(path)
         return self.load_legal_dong_records(
@@ -163,6 +220,7 @@ class PostGISLegalDongStore:
             replace=replace,
             batch_size=batch_size,
             use_copy=use_copy,
+            load_default_aliases=load_default_aliases,
         )
 
     def load_legal_dong_records(
@@ -173,15 +231,62 @@ class PostGISLegalDongStore:
         replace: bool = True,
         batch_size: int = 10_000,
         use_copy: bool = True,
+        load_default_aliases: bool = True,
     ) -> int:
         if use_copy and self.engine.dialect.name == "postgresql":
-            return self._copy_legal_dong_records(records, source=source, replace=replace)
-        return self._insert_legal_dong_records(
-            records,
-            source=source,
-            replace=replace,
-            batch_size=batch_size,
-        )
+            count = self._copy_legal_dong_records(records, source=source, replace=replace)
+        else:
+            count = self._insert_legal_dong_records(
+                records,
+                source=source,
+                replace=replace,
+                batch_size=batch_size,
+            )
+        if load_default_aliases:
+            self.load_default_aliases()
+        return count
+
+    def load_default_aliases(self) -> int:
+        """Load built-in source-code aliases that point at CSV master codes."""
+
+        return self.upsert_legal_dong_aliases(DEFAULT_LEGAL_DONG_ALIASES)
+
+    def upsert_legal_dong_aliases(self, aliases: Iterable[dict[str, str]]) -> int:
+        rows = [
+            {
+                "source_system": alias["source_system"],
+                "source_layer": alias["source_layer"],
+                "source_code": alias["source_code"],
+                "source_name": alias.get("source_name", ""),
+                "legal_dong_code": alias["legal_dong_code"],
+                "reason": alias.get("reason", ""),
+                "is_active": True,
+                "loaded_at": datetime.now(UTC),
+            }
+            for alias in aliases
+        ]
+        if not rows:
+            return 0
+        statement = pg_insert(self.alias_table).values(rows)
+        update_values = {
+            "source_name": statement.excluded.source_name,
+            "legal_dong_code": statement.excluded.legal_dong_code,
+            "reason": statement.excluded.reason,
+            "is_active": statement.excluded.is_active,
+            "loaded_at": statement.excluded.loaded_at,
+        }
+        with self.engine.begin() as connection:
+            connection.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[
+                        self.alias_table.c.source_system,
+                        self.alias_table.c.source_layer,
+                        self.alias_table.c.source_code,
+                    ],
+                    set_=update_values,
+                )
+            )
+        return len(rows)
 
     def load_boundary_zips(
         self,
@@ -190,6 +295,7 @@ class PostGISLegalDongStore:
         replace: bool = True,
         encoding: str = "cp949",
         batch_size: int = 20_000,
+        source_system: str = "vworld_n3a",
     ) -> BoundaryLoadResult:
         """Load zipped shapefiles with GeoPandas and map BJCD/source codes to FK codes."""
 
@@ -203,8 +309,10 @@ class PostGISLegalDongStore:
                 )
 
         legal_status = self._legal_status_lookup()
+        alias_lookup = self._alias_lookup(source_system)
         total_loaded = 0
         total_matched = 0
+        total_alias_mapped = 0
         total_missing = 0
         total_inactive = 0
         files: list[str] = []
@@ -220,19 +328,23 @@ class PostGISLegalDongStore:
             files.append(source_file)
             frame["source_code"] = frame[code_column].astype(str).str.strip()
             frame["source_name"] = frame[name_column].astype(str).str.strip() if name_column else ""
-            frame["legal_dong_code"] = frame["source_code"].where(
-                frame["source_code"].isin(legal_status.keys())
+            resolved = frame["source_code"].map(
+                lambda code, layer=source_layer: resolve_legal_dong_code(
+                    layer, str(code), legal_status, alias_lookup
+                )
             )
-            frame["mapping_status"] = "matched"
-            missing_mask = frame["legal_dong_code"].isna()
-            inactive_mask = frame["legal_dong_code"].map(
-                lambda code: legal_status.get(str(code), True) is False
+            frame["legal_dong_code"] = resolved.map(lambda item: item[0])
+            frame["mapping_status"] = resolved.map(lambda item: item[1])
+            missing_mask = frame["mapping_status"].eq("missing_legal_dong_code")
+            inactive_mask = frame["mapping_status"].isin(
+                {"inactive_legal_dong_code", "alias_target_inactive"}
             )
-            frame.loc[missing_mask, "mapping_status"] = "missing_legal_dong_code"
-            frame.loc[inactive_mask, "mapping_status"] = "inactive_legal_dong_code"
+            alias_mask = frame["mapping_status"].eq("alias_mapped")
+            matched_mask = frame["mapping_status"].eq("matched")
             missing_count = int(missing_mask.sum())
             inactive_count = int(inactive_mask.sum())
-            matched_count = int(len(frame) - missing_count)
+            alias_mapped_count = int(alias_mask.sum())
+            matched_count = int(matched_mask.sum())
             if missing_count or inactive_count:
                 issues.extend(_boundary_issues(frame, missing_mask | inactive_mask, source_file))
             out = frame[
@@ -258,11 +370,13 @@ class PostGISLegalDongStore:
             )
             total_loaded += len(out)
             total_matched += matched_count
+            total_alias_mapped += alias_mapped_count
             total_missing += missing_count
             total_inactive += inactive_count
         return BoundaryLoadResult(
             loaded=total_loaded,
             matched=total_matched,
+            alias_mapped=total_alias_mapped,
             missing=total_missing,
             inactive=total_inactive,
             files=tuple(files),
@@ -355,6 +469,23 @@ class PostGISLegalDongStore:
             )
             return {str(code): bool(is_active) for code, is_active in rows}
 
+    def _alias_lookup(self, source_system: str) -> dict[tuple[str, str], str]:
+        with self.engine.connect() as connection:
+            rows = connection.execute(
+                select(
+                    self.alias_table.c.source_layer,
+                    self.alias_table.c.source_code,
+                    self.alias_table.c.legal_dong_code,
+                ).where(
+                    self.alias_table.c.source_system == source_system,
+                    self.alias_table.c.is_active.is_(True),
+                )
+            )
+            return {
+                (str(source_layer), str(source_code)): str(legal_dong_code)
+                for source_layer, source_code, legal_dong_code in rows
+            }
+
 
 def make_postgis_metadata(*, schema: str | None = "public", srid: int = 5179) -> MetaData:
     metadata = MetaData(schema=schema)
@@ -378,6 +509,25 @@ def make_postgis_metadata(*, schema: str | None = "public", srid: int = 5179) ->
         Index("ix_legal_dong_codes_sigungu", "sigungu_code"),
         Index("ix_legal_dong_codes_emd", "eup_myeon_dong_code"),
         Index("ix_legal_dong_codes_active", "is_active"),
+    )
+    Table(
+        LEGAL_DONG_ALIAS_TABLE,
+        metadata,
+        Column("source_system", String(80), primary_key=True),
+        Column("source_layer", String(80), primary_key=True),
+        Column("source_code", String(30), primary_key=True),
+        Column("source_name", String(200), nullable=False, default=""),
+        Column(
+            "legal_dong_code",
+            String(10),
+            ForeignKey(legal.c.legal_dong_code, name="fk_alias_legal_dong_code"),
+            nullable=False,
+        ),
+        Column("reason", String(500), nullable=False, default=""),
+        Column("is_active", Boolean, nullable=False, default=True),
+        Column("loaded_at", DateTime(timezone=True), nullable=False),
+        Index("ix_legal_dong_aliases_legal_code", "legal_dong_code"),
+        Index("ix_legal_dong_aliases_source_code", "source_code"),
     )
     Table(
         LEGAL_DONG_BOUNDARY_TABLE,
@@ -448,6 +598,30 @@ def boundary_level_from_path(path: str | Path) -> str:
     if "G011" in stem:
         return "eup_myeon_dong"
     return "unknown"
+
+
+def resolve_legal_dong_code(
+    source_layer: str,
+    source_code: str,
+    legal_status: dict[str, bool],
+    alias_lookup: dict[tuple[str, str], str],
+) -> tuple[str | None, str]:
+    """Resolve a boundary source code to the CSV-master legal-dong code."""
+
+    code = source_code.strip()
+    if code in legal_status:
+        if legal_status[code]:
+            return code, "matched"
+        return code, "inactive_legal_dong_code"
+
+    alias = alias_lookup.get((source_layer, code)) or alias_lookup.get(("*", code))
+    if alias is None:
+        return None, "missing_legal_dong_code"
+    if alias not in legal_status:
+        return None, "missing_legal_dong_code"
+    if not legal_status[alias]:
+        return alias, "alias_target_inactive"
+    return alias, "alias_mapped"
 
 
 def _legal_dong_row(record: LegalDongRecord, source: str) -> tuple[Any, ...]:

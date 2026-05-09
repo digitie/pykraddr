@@ -105,8 +105,13 @@ with PostGISLegalDongStore(url, schema="kraddr") as store:
 ```
 
 The PostGIS loader uses `psycopg` COPY for legal-dong CSV rows and GeoPandas /
-GeoAlchemy2 for SHP ZIP boundary loading. The WSL2 validation report is in
-[docs/legal-dong-postgis-report.md](docs/legal-dong-postgis-report.md).
+GeoAlchemy2 for SHP ZIP boundary loading. CSV legal-dong codes remain the
+master; source-specific GIS differences, such as VWorld/N3A Sejong
+`3600000000` mapping to code.go.kr `3611000000`, are handled through aliases.
+The WSL2 validation report is in
+[docs/legal-dong-postgis-report.md](docs/legal-dong-postgis-report.md). See
+[docs/geocoding-readiness.md](docs/geocoding-readiness.md) for the remaining
+datasets needed for precise geocoding and reverse geocoding.
 
 The TXT parser also works directly:
 
