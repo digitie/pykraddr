@@ -130,6 +130,8 @@ The PostGIS schema adds:
   codes without adding non-master codes to `legal_dong_codes`.
 - `legal_dong_boundaries`: SHP boundary table with `geom MULTIPOLYGON(5179)`.
 - `legal_dong_boundary_mapping_issues`: view for missing/inactive source codes.
+- `road_address_points`: optional Juso navigation DB address-point table for
+  offline road-name reverse geocoding.
 
 The FK is:
 
@@ -165,6 +167,51 @@ validated `tripmate` dataset mismatch report.
 
 See `docs/geocoding-readiness.md` for what the current DB can and cannot do for
 forward geocoding and reverse geocoding.
+
+See `docs/reverse-geocoding.md` for coordinate-to-road-name-address lookup,
+including Juso offline point storage and the `pyvworld` fallback.
+
+### `road_address_points`
+
+This optional PostGIS table stores Juso navigation DB building-info rows as
+address points.
+
+Primary key:
+
+```text
+building_management_number
+```
+
+Important columns:
+
+```text
+legal_dong_code
+road_name_code
+underground_yn
+building_main_no
+building_sub_no
+postal_code
+road_address
+building_name
+x
+y
+coordinate_source
+change_reason_code
+geom geometry(Point, 5179)
+```
+
+`coordinate_source` is `entrance` when the provider row has entrance x/y, and
+`center` when pykraddr falls back to the building center coordinate.
+
+Nearest road-name reverse geocoding uses:
+
+```sql
+ORDER BY geom <-> ST_Transform(ST_SetSRID(ST_MakePoint(:lon, :lat), 4326), 5179)
+LIMIT 1
+```
+
+Keep this table separate from cadastral parcel polygons. It answers "nearest
+road-name address point", not "which parcel contains this coordinate".
 
 ### `road_name_addresses`
 

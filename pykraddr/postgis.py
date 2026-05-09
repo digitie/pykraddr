@@ -558,8 +558,8 @@ def read_boundary_zip(path: str | Path, *, srid: int = 5179, encoding: str = "cp
     """Read one zipped shapefile with GeoPandas and normalize geometry to geom."""
 
     try:
-        import geopandas as gpd
-        from shapely.geometry import MultiPolygon, Polygon
+        import geopandas as gpd  # type: ignore[import-untyped]
+        from shapely.geometry import MultiPolygon, Polygon  # type: ignore[import-untyped]
     except ImportError as exc:
         raise RuntimeError(
             "geopandas and shapely are required for boundary ZIP loading. "

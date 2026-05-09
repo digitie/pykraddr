@@ -40,12 +40,24 @@ from .models import (
     RoadNameAddressKoreanRecord,
 )
 from .postgis import BoundaryLoadResult, PostGISLegalDongStore, make_postgis_metadata
+from .reverse import (
+    AddressPointLoadResult,
+    NavigationBuildingRecord,
+    ReverseGeocoder,
+    ReverseGeocodeResult,
+    RoadAddressPointStore,
+    VWorldReverseGeocoder,
+    iter_navigation_building_records,
+    load_navigation_building_records,
+    make_address_point_metadata,
+)
 from .store import RoadNameAddressStore
 
 JusoClient = KrAddrClient
 
 __all__ = [
     "AddressCoordinate",
+    "AddressPointLoadResult",
     "AddressSearchResult",
     "BoundaryLoadResult",
     "DATA_GO_KR_LEGAL_DONG_PAGE_URL",
@@ -64,19 +76,27 @@ __all__ = [
     "KrAddrRequestError",
     "KrAddrServerError",
     "LegalDongRecord",
+    "NavigationBuildingRecord",
     "ROAD_NAME_KOREAN_DETAIL_SN",
     "RelatedJibunRecord",
+    "ReverseGeocodeResult",
+    "ReverseGeocoder",
     "RoadNameAddressDataClient",
     "RoadNameAddressKoreanRecord",
     "RoadNameAddressStore",
+    "RoadAddressPointStore",
     "PostGISLegalDongStore",
+    "VWorldReverseGeocoder",
     "archive_standard_date",
     "iter_related_jibun_records",
     "iter_legal_dong_records",
+    "iter_navigation_building_records",
     "iter_road_name_address_records",
     "load_legal_dong_records",
+    "load_navigation_building_records",
     "load_related_jibun_records",
     "load_road_name_address_records",
     "make_postgis_metadata",
+    "make_address_point_metadata",
     "records_from_openapi_rows",
 ]

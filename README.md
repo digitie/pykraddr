@@ -113,6 +113,31 @@ The WSL2 validation report is in
 [docs/geocoding-readiness.md](docs/geocoding-readiness.md) for the remaining
 datasets needed for precise geocoding and reverse geocoding.
 
+## Reverse Geocoding
+
+For coordinate-to-road-name-address lookup, pykraddr is offline-first:
+
+```python
+from pykraddr import ReverseGeocoder, RoadAddressPointStore, VWorldReverseGeocoder
+
+url = "postgresql+psycopg://postgres:postgres@localhost:55433/pykraddr"
+
+with RoadAddressPointStore(url, schema="kraddr") as store:
+    store.load_navigation_building_archive("dataset/navigation_building.zip")
+    geocoder = ReverseGeocoder(
+        offline_store=store,
+        vworld=VWorldReverseGeocoder.from_env(),
+        max_offline_distance_m=50,
+    )
+    result = geocoder.reverse_road_address(lon=127.1013, lat=37.4023)
+    print(result.road_address if result else None)
+```
+
+The offline table uses the Juso navigation DB building TXT coordinates. If the
+offline store is not configured or no nearby address point is found, the
+wrapper can fall back to `pyvworld` and VWorld Geocoder API 2.0. See
+[docs/reverse-geocoding.md](docs/reverse-geocoding.md).
+
 The TXT parser also works directly:
 
 ```python

@@ -22,6 +22,8 @@ The current loaders can build these useful foundations:
 - PNU derivation from legal-dong code, mountain flag, and lot numbers.
 - Road-name address/building management number keys.
 - Daily insert/update/delete application for Juso TXT deltas.
+- Optional road-name address point table from Juso navigation DB building TXT.
+- Optional VWorld reverse geocoding fallback through `pyvworld`.
 
 ### Good For
 
@@ -39,10 +41,18 @@ Address normalization and key lookup:
   number.
 - Join road-name rows to related jibun rows through management number.
 
+Road-name address reverse lookup:
+
+- If Juso navigation DB building TXT has been loaded into
+  `road_address_points`, find the nearest road-name address point for a WGS84
+  coordinate.
+- If the offline point store is not available or no point is close enough, use
+  `VWorldReverseGeocoder` to call VWorld Geocoder API 2.0 through `pyvworld`.
+
 ## Not Yet Sufficient For Full Geocoding
 
 The current built DB does **not** yet contain every dataset needed for
-production-grade forward geocoding or reverse geocoding.
+production-grade forward geocoding or every level of reverse geocoding.
 
 ### Forward Geocoding Gap
 
@@ -89,15 +99,18 @@ Reverse geocoding can mean several levels:
 2. Parcel/jibun containing a point.
 3. Nearest or containing building/road-name address.
 
-The current DB supports level 1 down to eup/myeon/dong boundary, but not parcel
-or building-level reverse geocoding.
+The current DB supports level 1 down to eup/myeon/dong boundary. With
+`road_address_points` loaded from Juso navigation DB, it also supports nearest
+building-level road-name address lookup. It still does not support parcel
+containment reverse geocoding until cadastral parcel polygons are loaded.
 
 Needed additions:
 
 - Parcel/cadastral polygons keyed by PNU for jibun-level reverse geocoding.
 - Building footprints or building register geometry keyed by building
   management number for building-level reverse geocoding.
-- Address/building points for nearest-address fallback.
+- Address/building points for nearest-address fallback. This is now supported
+  by `RoadAddressPointStore` when the Juso navigation DB is available.
 - Road centerlines and road-name codes if road-segment interpolation or
   nearest-road reverse geocoding is required.
 
@@ -148,6 +161,9 @@ reverse_geocode_parcel
 reverse_geocode_nearest_address_point
 ```
 
+See [reverse-geocoding.md](reverse-geocoding.md) for the offline-first
+road-name reverse geocoding design and the VWorld API fallback.
+
 ## Coordinate Reference Systems
 
 The current SHP boundary data is loaded as SRID `5179`. For APIs and web maps,
@@ -173,7 +189,8 @@ FROM kraddr.legal_dong_boundaries;
 Before treating the DB as production geocoding infrastructure, add recurring
 checks:
 
-- Every active road-name address has a coordinate.
+- Every active road-name address has a coordinate when navigation DB points are
+  loaded.
 - Every coordinate joins to an active legal-dong code.
 - Every related-jibun PNU has a matching parcel polygon when parcel data is
   loaded.
@@ -187,13 +204,15 @@ checks:
 ## Bottom Line
 
 The current DB is a solid administrative-code and boundary foundation. It can
-support legal-dong lookups, administrative reverse geocoding, and address-key
-normalization.
+support legal-dong lookups, administrative reverse geocoding, address-key
+normalization, and road-name reverse lookup once Juso navigation DB address
+points are loaded.
 
-It is not yet complete for precise forward geocoding or building/parcel-level
-reverse geocoding. The highest-priority additions are:
+It is not yet complete for parcel-level reverse geocoding or production-grade
+forward geocoding unless coordinate point data is loaded. The highest-priority
+additions are:
 
-1. Address/building point coordinates keyed by building management number.
+1. Load Juso navigation DB or location-summary DB address points.
 2. Parcel polygons keyed by PNU.
 3. Building footprints keyed by building management number.
 4. Search/ranking materialized views and text indexes.
