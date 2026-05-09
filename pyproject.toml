@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pykraddr"
 version = "0.1.0"
-description = "Python client and data loader for Korea Juso road-name address APIs and datasets."
+description = "한국 Juso 도로명주소 API와 데이터셋을 다루는 Python 클라이언트 및 적재 도구."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

@@ -1,4 +1,4 @@
-"""SQLAlchemy 2 storage and daily incremental update logic for Juso TXT files."""
+"""Juso TXT 파일을 위한 SQLAlchemy 2 저장소와 일별 증분 갱신 로직."""
 
 from __future__ import annotations
 
@@ -57,10 +57,10 @@ JIBUN_DERIVED_COLUMNS = (
 
 
 class RoadNameAddressStore:
-    """SQLAlchemy 2 store for full loads and daily incremental Juso address updates.
+    """전체분 적재와 일별 증분 갱신을 처리하는 SQLAlchemy 2 저장소.
 
-    The default backend is SQLite, which keeps the address DB portable while still
-    using SQLAlchemy 2 Core tables, engines, transactions, and dialect upserts.
+    기본 백엔드는 SQLite다. 주소 DB를 휴대하기 쉽게 유지하면서도 SQLAlchemy 2
+    Core 테이블, 엔진, 트랜잭션, 방언별 upsert를 사용한다.
     """
 
     def __init__(self, path: str | os.PathLike[str] | Engine) -> None:
@@ -87,7 +87,7 @@ class RoadNameAddressStore:
         self.close()
 
     def create_schema(self) -> None:
-        """Create tables, add compatible derived columns, and create indexes."""
+        """테이블을 만들고, 호환용 파생 컬럼과 인덱스를 준비한다."""
 
         self.metadata.create_all(self.engine)
         if self.engine.dialect.name == "sqlite":
@@ -95,7 +95,7 @@ class RoadNameAddressStore:
         self._create_indexes()
 
     def reset(self) -> None:
-        """Delete all loaded address rows and sync metadata."""
+        """적재된 주소 행과 동기화 메타데이터를 모두 삭제한다."""
 
         with self.engine.begin() as connection:
             connection.execute(self.road_table.delete())
@@ -109,9 +109,9 @@ class RoadNameAddressStore:
         replace: bool = True,
         batch_size: int = 10_000,
     ) -> dict[str, int]:
-        """Load a full monthly ZIP/TXT into SQLite.
+        """월 전체분 ZIP/TXT를 SQLite에 적재한다.
 
-        When ``replace`` is true the previous store contents are removed first.
+        ``replace``가 참이면 기존 저장소 내용을 먼저 제거한다.
         """
 
         if replace:
@@ -136,9 +136,9 @@ class RoadNameAddressStore:
         *,
         batch_size: int = 10_000,
     ) -> dict[str, int]:
-        """Apply a daily change ZIP/TXT using Juso movement reason codes.
+        """Juso 변동 사유 코드를 사용해 일변동 ZIP/TXT를 반영한다.
 
-        ``31`` and ``34`` are upserted. ``63`` is deleted.
+        ``31``과 ``34``는 upsert하고, ``63``은 삭제한다.
         """
 
         road_counts = self.apply_road_changes(
@@ -240,7 +240,7 @@ class RoadNameAddressStore:
         self,
         management_number: str,
     ) -> list[RowMapping]:
-        """Return road-name rows for a 26-digit road/building management number."""
+        """26자리 도로명주소/건물 관리번호에 연결된 도로명주소 행을 반환한다."""
 
         with self.engine.connect() as connection:
             return list(
@@ -254,7 +254,7 @@ class RoadNameAddressStore:
             )
 
     def find_road_addresses_by_pnu(self, pnu: str, *, limit: int = 100) -> list[RowMapping]:
-        """Return road-name address rows attached to one 19-digit PNU parcel key."""
+        """19자리 PNU 필지 키에 연결된 도로명주소 행을 반환한다."""
 
         with self.engine.connect() as connection:
             return list(
@@ -268,7 +268,7 @@ class RoadNameAddressStore:
             )
 
     def find_related_jibuns_by_pnu(self, pnu: str, *, limit: int = 100) -> list[RowMapping]:
-        """Return related-jibun rows attached to one 19-digit PNU parcel key."""
+        """19자리 PNU 필지 키에 연결된 관련 지번 행을 반환한다."""
 
         with self.engine.connect() as connection:
             return list(
@@ -359,7 +359,7 @@ class RoadNameAddressStore:
         )
 
     def _add_missing_sqlite_columns(self) -> None:
-        """Add derived columns when opening a database created by an older release."""
+        """이전 버전이 만든 DB를 열 때 누락된 파생 컬럼을 추가한다."""
 
         tables = (self.road_table, self.jibun_table)
         preparer = self.engine.dialect.identifier_preparer
@@ -389,15 +389,14 @@ class RoadNameAddressStore:
                     index.create(connection, checkfirst=True)
 
     def backfill_derived_columns(self) -> None:
-        """Backfill derived code/PNU columns in a database loaded by an older version.
+        """이전 버전으로 적재한 DB의 코드/PNU 파생 컬럼을 채운다.
 
-        New full and daily loads fill these columns during upsert. This helper is
-        useful after upgrading an existing SQLite DB without reloading the full
-        monthly archive.
+        새 전체분/일변동 적재는 upsert 중에 이 컬럼들을 채운다. 이 헬퍼는
+        월 전체분을 다시 적재하지 않고 기존 SQLite DB를 업그레이드할 때 유용하다.
         """
 
         if self.engine.dialect.name != "sqlite":
-            raise NotImplementedError("backfill_derived_columns currently supports SQLite only")
+            raise NotImplementedError("backfill_derived_columns는 현재 SQLite만 지원합니다")
         with self.engine.begin() as connection:
             connection.execute(
                 text(

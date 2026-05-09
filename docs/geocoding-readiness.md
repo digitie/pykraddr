@@ -1,87 +1,85 @@
-# Geocoding and Reverse-Geocoding Readiness
+# 지오코딩 및 리버스 지오코딩 준비 상태
 
-Date: 2026-05-09
+작성일: 2026-05-09
 
-This note evaluates the database built by the current pykraddr loaders:
+이 문서는 현재 pykraddr 로더로 구축할 수 있는 DB가 지오코딩과 리버스
+지오코딩에 어느 정도 충분한지 평가합니다.
 
-- Juso road-name address Korean TXT data through `RoadNameAddressStore`
-- data.go.kr/code.go.kr legal-dong CSV through `PostGISLegalDongStore`
-- VWorld/N3A legal-dong boundary SHP ZIPs through GeoPandas/PostGIS
+## 현재 포함된 구성
 
-## Current Coverage
+현재 로더가 만들 수 있는 기반 데이터:
 
-### Available
+- `RoadNameAddressStore`가 적재하는 Juso "도로명주소 한글" TXT 마스터
+- `RoadNameAddressStore`가 적재하는 관련 지번 TXT
+- `PostGISLegalDongStore`가 적재하는 data.go.kr/code.go.kr 법정동 CSV
+- GeoPandas/PostGIS로 적재하는 VWorld/N3A 법정동 경계 SHP ZIP
+- 법정동코드 소스 차이를 다루는 `legal_dong_code_aliases`
+- Juso 내비게이션용DB 건물정보 TXT를 적재하는 `road_address_points`
+- `pyvworld`를 통한 VWorld 리버스 지오코딩 보조 호출
 
-The current loaders can build these useful foundations:
+## 가능한 일
 
-- Legal-dong code master with active/inactive status.
-- Legal-dong code aliases for source-system drift.
-- Sido, sigungu, and eup/myeon/dong boundary polygons in PostGIS.
-- Road-name address master rows from Juso TXT.
-- Related jibun rows from Juso TXT.
-- PNU derivation from legal-dong code, mountain flag, and lot numbers.
-- Road-name address/building management number keys.
-- Daily insert/update/delete application for Juso TXT deltas.
-- Optional road-name address point table from Juso navigation DB building TXT.
-- Optional VWorld reverse geocoding fallback through `pyvworld`.
+### 행정구역 리버스 조회
 
-### Good For
+좌표가 주어졌을 때 시도/시군구/읍면동 경계 안에 들어가는지 찾을 수 있습니다.
+경계 행은 `legal_dong_codes`와 조인할 수 있습니다.
 
-Administrative reverse lookup:
+운영 쿼리에서는 보통 다음 조건을 함께 둡니다.
 
-- Given a point, find containing sido/sigungu/eup-myeon-dong boundary.
-- Join the containing boundary to `legal_dong_codes`.
-- Use `mapping_status IN ('matched', 'alias_mapped')` and `is_active IS TRUE`
-  for active-only administrative results.
+```sql
+b.mapping_status IN ('matched', 'alias_mapped')
+AND c.is_active IS TRUE
+```
 
-Address normalization and key lookup:
+### 주소 키 정규화
 
-- Parse or search road-name address master data by legal-dong code, road-name
-  code, building main/sub number, postal code, PNU, and building management
-  number.
-- Join road-name rows to related jibun rows through management number.
+"도로명주소 한글" TXT는 다음 식별자 기반 조회와 조인에 유용합니다.
 
-Road-name address reverse lookup:
+- 법정동코드
+- 도로명코드
+- 건물 본번/부번
+- 우편번호
+- PNU
+- 도로명주소/건물 관리번호
 
-- If Juso navigation DB building TXT has been loaded into
-  `road_address_points`, find the nearest road-name address point for a WGS84
-  coordinate.
-- If the offline point store is not available or no point is close enough, use
-  `VWorldReverseGeocoder` to call VWorld Geocoder API 2.0 through `pyvworld`.
+관련 지번 행은 관리번호를 통해 도로명주소 마스터 행과 연결됩니다.
 
-## Not Yet Sufficient For Full Geocoding
+### 도로명주소 리버스 조회
 
-The current built DB does **not** yet contain every dataset needed for
-production-grade forward geocoding or every level of reverse geocoding.
+Juso 내비게이션용DB 건물정보 TXT를 `road_address_points`에 적재하면 WGS84 좌표에서
+가장 가까운 도로명주소점을 찾을 수 있습니다.
 
-### Forward Geocoding Gap
+오프라인 주소점 저장소가 없거나 설정한 거리 안에 결과가 없으면
+`VWorldReverseGeocoder`가 `pyvworld`를 통해 VWorld Geocoder API 2.0을 호출할 수
+있습니다.
 
-Forward geocoding means converting a textual address into coordinates.
+## 아직 부족한 부분
 
-The current Juso "도로명주소 한글" TXT master gives identifiers and address
-components, but it does not include a point geometry for each building/address.
-Therefore, it can identify the address row but cannot return a precise
-coordinate by itself.
+현재 DB는 모든 수준의 지오코딩/리버스 지오코딩을 완성하지는 않습니다.
 
-Needed additions:
+### 정방향 지오코딩
 
-- Address/building point table keyed by `building_management_number` or
-  `road_address_management_number`.
-- Coordinate source, for example Juso coordinate API snapshots, Juso/VWorld
-  address-point datasets, building entrance points, or building centroid data.
-- Geometry column such as `geom geometry(Point, 5179)` plus optionally WGS84
-  lon/lat generated columns or a transformed view.
-- Quality/source metadata: source system, coordinate type, observed date,
-  confidence, and whether the point is entrance, centroid, parcel centroid, or
-  interpolated.
+정방향 지오코딩은 텍스트 주소를 좌표로 바꾸는 작업입니다.
 
-Recommended table:
+"도로명주소 한글" TXT 마스터만으로는 주소 행을 식별할 수 있지만, 각 건물이나
+주소의 좌표를 직접 반환할 수 없습니다. Juso 내비게이션용DB나 위치정보요약DB
+좌표를 함께 적재해야 정밀 좌표 반환이 가능합니다.
+
+필요한 추가 요소:
+
+- `building_management_number` 또는 `road_address_management_number` 기준 주소점
+- 좌표 출처와 좌표 유형
+- `geom geometry(Point, 5179)`
+- API/웹지도용 WGS84 변환 뷰 또는 lon/lat 생성 컬럼
+- 좌표 품질 메타데이터: 출처, 관측일, 출입구/중심점/보간 여부
+
+권장 테이블:
 
 ```text
 address_points
-  building_management_number PK/FK-ish
+  building_management_number PK
   road_address_management_number
-  legal_dong_code FK
+  legal_dong_code
   pnu
   coordinate_source
   coordinate_type
@@ -91,35 +89,32 @@ address_points
   loaded_at
 ```
 
-### Reverse Geocoding Gap
+현재 구현된 `road_address_points`는 이 권장안의 첫 단계입니다.
 
-Reverse geocoding can mean several levels:
+### 필지 단위 리버스 지오코딩
 
-1. Administrative area containing a point.
-2. Parcel/jibun containing a point.
-3. Nearest or containing building/road-name address.
+리버스 지오코딩은 여러 수준으로 나뉩니다.
 
-The current DB supports level 1 down to eup/myeon/dong boundary. With
-`road_address_points` loaded from Juso navigation DB, it also supports nearest
-building-level road-name address lookup. It still does not support parcel
-containment reverse geocoding until cadastral parcel polygons are loaded.
+1. 좌표가 속한 행정구역
+2. 좌표가 속한 필지/지번
+3. 가장 가까운 건물 또는 도로명주소
 
-Needed additions:
+현재 DB는 1번을 지원합니다. `road_address_points`를 적재하면 3번의 최근접
+도로명주소도 지원합니다. 하지만 2번의 필지 포함 관계는 지적 폴리곤이 있어야
+합니다.
 
-- Parcel/cadastral polygons keyed by PNU for jibun-level reverse geocoding.
-- Building footprints or building register geometry keyed by building
-  management number for building-level reverse geocoding.
-- Address/building points for nearest-address fallback. This is now supported
-  by `RoadAddressPointStore` when the Juso navigation DB is available.
-- Road centerlines and road-name codes if road-segment interpolation or
-  nearest-road reverse geocoding is required.
+추가로 필요한 데이터:
 
-Recommended tables:
+- PNU 키를 가진 필지/지적 폴리곤
+- 건물 관리번호를 가진 건물 외곽 폴리곤 또는 건축물 공간 데이터
+- 도로명코드가 있는 도로 중심선
+
+권장 테이블:
 
 ```text
 parcel_boundaries
   pnu PK
-  legal_dong_code FK
+  legal_dong_code
   mountain_yn
   lot_main_no
   lot_sub_no
@@ -127,7 +122,7 @@ parcel_boundaries
 
 building_footprints
   building_management_number PK
-  legal_dong_code FK
+  legal_dong_code
   pnu
   geom geometry(MultiPolygon, 5179)
 
@@ -138,20 +133,20 @@ road_centerlines
   geom geometry(MultiLineString, 5179)
 ```
 
-## Search and Ranking Requirements
+## 검색과 랭킹
 
-A practical geocoder also needs text search and ranking, not only tables.
+실용적인 지오코더에는 테이블뿐 아니라 텍스트 검색과 랭킹도 필요합니다.
 
-Recommended additions:
+권장 추가 요소:
 
-- Normalized Korean address tokens table.
-- Road-name and jibun search materialized views.
-- PostgreSQL trigram extension (`pg_trgm`) for typo-tolerant search.
-- Full-text or token indexes for Korean address components.
-- Normalized building name aliases and apartment names.
-- Historical/previous address handling using movement/change codes.
+- 정규화된 한국 주소 토큰 테이블
+- 도로명주소/지번 주소 검색용 구체화 뷰
+- 오타 허용 검색용 PostgreSQL `pg_trgm` 확장
+- 한국 주소 구성요소별 토큰 인덱스
+- 건물명, 아파트명, 별칭 정규화
+- 이전 주소와 변동 이력 처리
 
-Potential views:
+후보 뷰:
 
 ```text
 geocode_road_address_search
@@ -161,21 +156,21 @@ reverse_geocode_parcel
 reverse_geocode_nearest_address_point
 ```
 
-See [reverse-geocoding.md](reverse-geocoding.md) for the offline-first
-road-name reverse geocoding design and the VWorld API fallback.
+오프라인 우선 도로명주소 리버스 지오코딩 설계와 VWorld 보조 호출은
+[reverse-geocoding.md](reverse-geocoding.md)에 따로 정리했습니다.
 
-## Coordinate Reference Systems
+## 좌표계
 
-The current SHP boundary data is loaded as SRID `5179`. For APIs and web maps,
-WGS84 is usually needed.
+현재 SHP 경계와 주소점은 SRID `5179` 기준으로 저장합니다. API와 웹지도에서는
+보통 WGS84가 필요하므로 질의나 뷰에서 `4326`으로 변환합니다.
 
-Recommended:
+권장 방식:
 
-- Store authoritative geometry in EPSG:5179.
-- Add transformed query views for EPSG:4326.
-- Return both projected coordinates and lon/lat when useful.
+- 권위 좌표는 EPSG:5179로 저장합니다.
+- API 응답용 EPSG:4326 변환 뷰를 추가합니다.
+- 필요하면 투영 좌표와 lon/lat을 함께 반환합니다.
 
-Example:
+예시:
 
 ```sql
 SELECT
@@ -184,35 +179,28 @@ SELECT
 FROM kraddr.legal_dong_boundaries;
 ```
 
-## Data Quality Checks To Add
+## 품질 점검 항목
 
-Before treating the DB as production geocoding infrastructure, add recurring
-checks:
+운영 지오코딩 인프라로 보기 전에 다음 점검을 반복 실행하는 것이 좋습니다.
 
-- Every active road-name address has a coordinate when navigation DB points are
-  loaded.
-- Every coordinate joins to an active legal-dong code.
-- Every related-jibun PNU has a matching parcel polygon when parcel data is
-  loaded.
-- Boundary polygons are valid: `ST_IsValid(geom)`.
-- Boundary polygons have expected containment hierarchy:
-  eup/myeon/dong within sigungu, sigungu within sido.
-- Alias mappings are reviewed and source-specific, never inserted into the
-  CSV-master table.
-- Daily address deltas do not create orphan coordinate rows.
+- 활성 도로명주소가 좌표를 갖는지 확인합니다.
+- 좌표가 활성 법정동코드와 조인되는지 확인합니다.
+- 관련 지번 PNU가 필지 폴리곤과 매칭되는지 확인합니다.
+- 경계와 필지 폴리곤이 `ST_IsValid(geom)`을 통과하는지 확인합니다.
+- 읍면동은 시군구 안에, 시군구는 시도 안에 들어가는 위계 포함 관계를
+  확인합니다.
+- 별칭 매핑은 소스별로 검토하고 CSV 마스터 테이블에는 넣지 않습니다.
+- 일변동 주소 델타가 고아 좌표 행을 만들지 않는지 확인합니다.
 
-## Bottom Line
+## 결론
 
-The current DB is a solid administrative-code and boundary foundation. It can
-support legal-dong lookups, administrative reverse geocoding, address-key
-normalization, and road-name reverse lookup once Juso navigation DB address
-points are loaded.
+현재 DB는 법정동 조회, 행정구역 리버스 지오코딩, 주소 키 정규화, 그리고 Juso
+내비게이션용DB 주소점 적재 후 도로명주소 리버스 조회까지 지원할 수 있습니다.
 
-It is not yet complete for parcel-level reverse geocoding or production-grade
-forward geocoding unless coordinate point data is loaded. The highest-priority
-additions are:
+정밀 정방향 지오코딩과 필지 단위 리버스 지오코딩까지 완성하려면 다음 작업이
+남아 있습니다.
 
-1. Load Juso navigation DB or location-summary DB address points.
-2. Parcel polygons keyed by PNU.
-3. Building footprints keyed by building management number.
-4. Search/ranking materialized views and text indexes.
+1. Juso 내비게이션용DB 또는 위치정보요약DB 주소점을 전국 단위로 적재합니다.
+2. PNU 키를 가진 필지 폴리곤을 적재합니다.
+3. 건물 관리번호를 가진 건물 외곽 폴리곤을 적재합니다.
+4. 검색/랭킹 구체화 뷰와 텍스트 인덱스를 추가합니다.

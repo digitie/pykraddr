@@ -1,4 +1,4 @@
-"""Reverse geocoding helpers for offline address points and VWorld fallback."""
+"""오프라인 주소점과 VWorld 보조 호출을 이용한 리버스 지오코딩 기능."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ def _freeze(raw: Mapping[str, Any] | None) -> Mapping[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class ReverseGeocodeResult:
-    """One reverse-geocoded address result."""
+    """리버스 지오코딩 주소 결과 한 건."""
 
     address_type: str
     road_address: str | None = None
@@ -99,7 +99,7 @@ class ReverseGeocodeResult:
 
 @dataclass(frozen=True, slots=True)
 class NavigationBuildingRecord:
-    """One building row from Juso navigation DB building-info TXT files."""
+    """Juso 내비게이션용DB 건물정보 TXT의 건물 행 한 건."""
 
     jurisdiction_emd_code: str
     sido_name: str
@@ -179,7 +179,7 @@ class NavigationBuildingRecord:
 
 @dataclass(frozen=True, slots=True)
 class AddressPointLoadResult:
-    """Summary for one address-point load."""
+    """주소점 적재 결과 요약."""
 
     loaded: int = 0
     skipped: int = 0
@@ -187,10 +187,10 @@ class AddressPointLoadResult:
 
 
 class RoadAddressPointStore:
-    """PostGIS store for offline road-name reverse geocoding.
+    """오프라인 도로명주소 리버스 지오코딩용 PostGIS 저장소.
 
-    The intended source is Juso's navigation DB building-info TXT. It contains
-    building-level road-name address attributes plus GRS80 UTM-K coordinates.
+    주 입력원은 Juso 내비게이션용DB 건물정보 TXT다. 이 자료에는 건물 단위
+    도로명주소 속성과 GRS80 UTM-K 좌표가 포함된다.
     """
 
     def __init__(
@@ -304,7 +304,7 @@ class RoadAddressPointStore:
         lat: float,
         max_distance_m: float | None = 50.0,
     ) -> ReverseGeocodeResult | None:
-        """Find the nearest offline road-name address for a WGS84 lon/lat point."""
+        """WGS84 경위도 좌표에 가장 가까운 오프라인 도로명주소를 찾는다."""
 
         return self.nearest_road_address_xy(
             x=lon,
@@ -406,7 +406,7 @@ class RoadAddressPointStore:
 
 
 class VWorldReverseGeocoder:
-    """Reverse geocoder backed by the optional ``pyvworld`` package."""
+    """선택 의존성인 ``pyvworld`` 패키지를 사용하는 리버스 지오코더."""
 
     def __init__(
         self,
@@ -423,8 +423,8 @@ class VWorldReverseGeocoder:
             from pyvworld import VworldClient  # type: ignore[import-not-found]
         except ImportError as exc:
             raise KrAddrRequestError(
-                "pyvworld is required for VWorld reverse geocoding. "
-                "Install it from https://github.com/digitie/pyvworld."
+                "VWorld 리버스 지오코딩에는 pyvworld가 필요합니다. "
+                "https://github.com/digitie/pyvworld 에서 설치하세요."
             ) from exc
         self.client = VworldClient(api_key=api_key, domain=domain, timeout=timeout)
 
@@ -434,8 +434,8 @@ class VWorldReverseGeocoder:
             from pyvworld import VworldClient
         except ImportError as exc:
             raise KrAddrRequestError(
-                "pyvworld is required for VWorld reverse geocoding. "
-                "Install it from https://github.com/digitie/pyvworld."
+                "VWorld 리버스 지오코딩에는 pyvworld가 필요합니다. "
+                "https://github.com/digitie/pyvworld 에서 설치하세요."
             ) from exc
         return cls(client=VworldClient.from_env(**kwargs))
 
@@ -445,8 +445,8 @@ class VWorldReverseGeocoder:
             from pyvworld import VworldClient
         except ImportError as exc:
             raise KrAddrRequestError(
-                "pyvworld is required for VWorld reverse geocoding. "
-                "Install it from https://github.com/digitie/pyvworld."
+                "VWorld 리버스 지오코딩에는 pyvworld가 필요합니다. "
+                "https://github.com/digitie/pyvworld 에서 설치하세요."
             ) from exc
         return cls(client=VworldClient.from_env_file(path, **kwargs))
 
@@ -497,7 +497,7 @@ class VWorldReverseGeocoder:
 
 
 class ReverseGeocoder:
-    """Offline-first reverse geocoder with optional VWorld API fallback."""
+    """오프라인 조회를 우선하고 필요하면 VWorld API로 보완하는 리버스 지오코더."""
 
     def __init__(
         self,
@@ -529,7 +529,7 @@ def iter_navigation_building_records(
     *,
     encoding: str | None = None,
 ) -> Iterator[NavigationBuildingRecord]:
-    """Stream Juso navigation DB building-info records from TXT or ZIP bytes."""
+    """TXT 또는 ZIP 바이트에서 Juso 내비게이션용DB 건물정보 레코드를 스트리밍한다."""
 
     for member in _iter_text_members(_content_bytes(path)):
         for line in _iter_decoded_lines(member.content, encoding=encoding):
@@ -553,7 +553,7 @@ def load_navigation_building_records(
     *,
     encoding: str | None = None,
 ) -> list[NavigationBuildingRecord]:
-    """Load all navigation DB building-info records from TXT or ZIP bytes."""
+    """TXT 또는 ZIP 바이트에서 내비게이션용DB 건물정보 레코드를 모두 읽어온다."""
 
     return list(iter_navigation_building_records(path, encoding=encoding))
 
@@ -645,7 +645,7 @@ def _offline_result(row: RowMapping) -> ReverseGeocodeResult:
 def _vworld_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     root = payload.get("response", payload)
     if not isinstance(root, Mapping):
-        raise KrAddrParseError("VWorld response root was not an object")
+        raise KrAddrParseError("VWorld 응답 최상위 값이 객체가 아닙니다")
     status = str(root.get("status") or "").upper()
     if status and status not in {"OK", "NORMAL"}:
         return []
@@ -661,7 +661,7 @@ def _vworld_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         if isinstance(items, Mapping):
             return [items]
         return [result]
-    raise KrAddrParseError("VWorld response.result was not an object or list")
+    raise KrAddrParseError("VWorld response.result가 객체 또는 목록이 아닙니다")
 
 
 def _vworld_result(
@@ -700,7 +700,7 @@ def _point_geometry_type(srid: int) -> Any:
     try:
         from geoalchemy2 import Geometry
     except ImportError as exc:
-        raise RuntimeError("geoalchemy2 is required for offline reverse geocoding") from exc
+        raise RuntimeError("오프라인 리버스 지오코딩에는 geoalchemy2가 필요합니다") from exc
     return Geometry("POINT", srid=srid, spatial_index=True)
 
 
@@ -708,7 +708,7 @@ def _point_element(x: float, y: float, srid: int) -> Any:
     try:
         from geoalchemy2 import WKTElement
     except ImportError as exc:
-        raise RuntimeError("geoalchemy2 is required for offline reverse geocoding") from exc
+        raise RuntimeError("오프라인 리버스 지오코딩에는 geoalchemy2가 필요합니다") from exc
     return WKTElement(f"POINT({x} {y})", srid=srid)
 
 

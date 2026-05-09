@@ -1,4 +1,4 @@
-"""HTTP helpers for Juso APIs."""
+"""Juso API 호출에 쓰는 HTTP 보조 함수."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class SessionLike(Protocol):
 
 
 def build_session(retries: int = 3) -> SessionLike:
-    """Build a requests session with conservative retries for idempotent calls."""
+    """멱등 호출에 보수적인 재시도를 적용한 requests 세션을 만든다."""
 
     session = requests.Session()
     session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
@@ -80,7 +80,7 @@ def build_session(retries: int = 3) -> SessionLike:
 
 
 def raise_for_http_error(response: ResponseLike, context: str) -> None:
-    """Map HTTP status codes to pykraddr exceptions."""
+    """HTTP 상태 코드를 pykraddr 예외로 변환한다."""
 
     status = int(response.status_code)
     text = response.text[:300]
@@ -95,20 +95,20 @@ def raise_for_http_error(response: ResponseLike, context: str) -> None:
 
 
 def response_json(response: ResponseLike, context: str) -> Mapping[str, Any]:
-    """Return a JSON object, forcing UTF-8 for current Juso SPA endpoints."""
+    """현재 Juso SPA 엔드포인트에 맞춰 UTF-8을 보정한 JSON 객체를 반환한다."""
 
     if response.encoding is None or response.encoding.lower() in {"iso-8859-1", "latin-1"}:
         response.encoding = "utf-8"
     try:
         payload = response.json()
     except ValueError as exc:
-        raise KrAddrParseError(f"{context}: response was not valid JSON") from exc
+        raise KrAddrParseError(f"{context}: 응답이 올바른 JSON이 아닙니다") from exc
     if not isinstance(payload, Mapping):
-        raise KrAddrParseError(f"{context}: JSON root was not an object")
+        raise KrAddrParseError(f"{context}: JSON 최상위 값이 객체가 아닙니다")
     return payload
 
 
 def without_none(params: Mapping[str, Any]) -> dict[str, Any]:
-    """Return params with None values removed."""
+    """값이 None인 항목을 제거한 요청 파라미터를 반환한다."""
 
     return {key: value for key, value in params.items() if value is not None}

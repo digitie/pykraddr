@@ -1,4 +1,4 @@
-"""Client for Juso address search APIs."""
+"""Juso 주소 검색 API 클라이언트."""
 
 from __future__ import annotations
 
@@ -28,17 +28,16 @@ T = TypeVar("T")
 
 
 class KrAddrClient:
-    """Client for non-popup Juso address APIs.
+    """팝업을 제외한 Juso 주소 API 클라이언트.
 
-    Implemented APIs:
-    - road-name address search: ``addrLinkApi.do``
-    - English address search: ``addrEngApi.do``
-    - coordinate search: ``addrCoordApi.do``
-    - detail-address search: ``addrDetailApi.do``
+    구현된 API:
+    - 도로명주소 검색: ``addrLinkApi.do``
+    - 영문주소 검색: ``addrEngApi.do``
+    - 좌표 검색: ``addrCoordApi.do``
+    - 상세주소 검색: ``addrDetailApi.do``
 
-    Juso's map search product is distributed as a guide/source bundle rather than
-    a simple JSON/XML endpoint, so the downloadable guide is exposed by
-    :meth:`download_map_api_guide`.
+    Juso 지도 검색 상품은 단순 JSON/XML 엔드포인트가 아니라
+    가이드/소스 묶음으로 배포되므로, 다운로드 헬퍼만 제공한다.
     """
 
     def __init__(
@@ -53,7 +52,7 @@ class KrAddrClient:
         key = confm_key or _first_env(DEFAULT_ENV_NAMES)
         if not key:
             raise KrAddrAuthError(
-                "confm_key is required. Pass confm_key=... or set JUSO_CONFM_KEY."
+                "confm_key가 필요합니다. confm_key=...를 넘기거나 JUSO_CONFM_KEY를 설정하세요."
             )
         self.confm_key = key
         self.timeout = timeout
@@ -64,7 +63,7 @@ class KrAddrClient:
     def from_env(cls, name: str = "JUSO_CONFM_KEY", **kwargs: Any) -> KrAddrClient:
         key = os.getenv(name)
         if not key:
-            raise KrAddrAuthError(f"{name} is not set")
+            raise KrAddrAuthError(f"{name} 환경 변수가 설정되어 있지 않습니다")
         return cls(confm_key=key, **kwargs)
 
     def raw_endpoint(
@@ -72,7 +71,7 @@ class KrAddrClient:
         endpoint: str,
         params: Mapping[str, Any] | None = None,
     ) -> JusoPage[Mapping[str, Any]]:
-        """Call a Juso search endpoint and return raw item mappings."""
+        """Juso 검색 엔드포인트를 호출하고 원본 항목 매핑을 반환한다."""
 
         return self._get_page(endpoint, params or {}, lambda row: row)
 
@@ -86,7 +85,7 @@ class KrAddrClient:
         first_sort: str | None = None,
         add_info: bool | str | None = None,
     ) -> JusoPage[AddressSearchResult]:
-        """Search Korean road-name addresses by keyword."""
+        """키워드로 한글 도로명주소를 검색한다."""
 
         params = self._page_params(current_page, count_per_page) | {
             "keyword": _required_text(keyword, "keyword"),
@@ -103,7 +102,7 @@ class KrAddrClient:
         current_page: int = 1,
         count_per_page: int = 10,
     ) -> JusoPage[EnglishAddressSearchResult]:
-        """Search English road-name addresses by keyword."""
+        """키워드로 영문 도로명주소를 검색한다."""
 
         params = self._page_params(current_page, count_per_page) | {
             "keyword": _required_text(keyword, "keyword")
@@ -119,7 +118,7 @@ class KrAddrClient:
         building_main_no: str | int,
         building_sub_no: str | int = 0,
     ) -> JusoPage[AddressCoordinate]:
-        """Fetch entrance coordinates for a selected road-name address."""
+        """선택한 도로명주소의 출입구 좌표를 조회한다."""
 
         params = {
             "admCd": _required_text(administrative_code, "administrative_code"),
@@ -141,10 +140,10 @@ class KrAddrClient:
         search_type: str = "dong",
         dong_name: str | None = None,
     ) -> JusoPage[DetailAddress]:
-        """Fetch registered detail-address dong/floor/ho rows for an address."""
+        """주소에 등록된 상세주소 동/층/호 정보를 조회한다."""
 
         if search_type not in {"dong", "floorho"}:
-            raise KrAddrRequestError('search_type must be "dong" or "floorho"')
+            raise KrAddrRequestError('search_type은 "dong" 또는 "floorho"이어야 합니다')
         params = {
             "admCd": _required_text(administrative_code, "administrative_code"),
             "rnMgtSn": _required_text(road_name_code, "road_name_code"),
@@ -164,7 +163,7 @@ class KrAddrClient:
         max_pages: int | None = None,
         **kwargs: Any,
     ) -> Iterator[AddressSearchResult]:
-        """Iterate all pages from :meth:`search`."""
+        """``search``의 모든 페이지를 순회한다."""
 
         page_no = 1
         pages = 0
@@ -184,10 +183,10 @@ class KrAddrClient:
             page_no = page.next_page or page_no + 1
 
     def download_map_api_guide(self, output_path: str | os.PathLike[str]) -> os.PathLike[str]:
-        """Download the official map API guide/source ZIP.
+        """공식 지도 API 가이드/소스 ZIP을 내려받는다.
 
-        The current Juso map API detail page exposes ``guideMapApi.zip`` as a
-        source bundle instead of documenting a JSON/XML search endpoint.
+        현재 Juso 지도 API 상세 페이지는 JSON/XML 검색 엔드포인트가 아니라
+        ``guideMapApi.zip`` 소스 묶음을 제공한다.
         """
 
         from pathlib import Path
@@ -201,15 +200,15 @@ class KrAddrClient:
             "regYmd": "2021",
         }
         response = self.session.get(url, params=params, timeout=self.timeout)
-        raise_for_http_error(response, "map API guide download")
+        raise_for_http_error(response, "지도 API 가이드 다운로드")
         path.write_bytes(bytes(response.content))
         return path
 
     def _page_params(self, current_page: int, count_per_page: int) -> dict[str, Any]:
         if current_page < 1:
-            raise KrAddrRequestError("current_page must be >= 1")
+            raise KrAddrRequestError("current_page는 1 이상이어야 합니다")
         if not 1 <= count_per_page <= 100:
-            raise KrAddrRequestError("count_per_page must be between 1 and 100")
+            raise KrAddrRequestError("count_per_page는 1 이상 100 이하이어야 합니다")
         return {
             "currentPage": current_page,
             "countPerPage": count_per_page,
@@ -245,10 +244,10 @@ def _parse_page(
 ) -> JusoPage[T]:
     results = payload.get("results", payload)
     if not isinstance(results, Mapping):
-        raise KrAddrParseError(f"{endpoint}: results was not an object")
+        raise KrAddrParseError(f"{endpoint}: results가 객체가 아닙니다")
     common = results.get("common", {})
     if not isinstance(common, Mapping):
-        raise KrAddrParseError(f"{endpoint}: common was not an object")
+        raise KrAddrParseError(f"{endpoint}: common이 객체가 아닙니다")
 
     error_code = str(common.get("errorCode", "0")).strip() or "0"
     error_message = str(common.get("errorMessage", "")).strip()
@@ -273,13 +272,13 @@ def _items(value: Any) -> list[Mapping[str, Any]]:
         return [value]
     if isinstance(value, list) and all(isinstance(item, Mapping) for item in value):
         return value
-    raise KrAddrParseError("results.juso was not an object or list")
+    raise KrAddrParseError("results.juso가 객체 또는 목록이 아닙니다")
 
 
 def _raise_for_juso_error(code: str, message: str, *, endpoint: str) -> None:
     if code in {"0", "00", ""}:
         return
-    text = f"{endpoint}: Juso returned {code}: {message}".strip()
+    text = f"{endpoint}: Juso가 오류 코드 {code}를 반환했습니다: {message}".strip()
     if code == "-999":
         raise KrAddrServerError(text)
     if code in {"E0001", "E0005"}:
@@ -307,7 +306,7 @@ def _first_env(names: tuple[str, ...]) -> str | None:
 def _required_text(value: str, field: str) -> str:
     text = str(value).strip()
     if not text:
-        raise KrAddrRequestError(f"{field} must not be empty")
+        raise KrAddrRequestError(f"{field}는 비어 있을 수 없습니다")
     return text
 
 
@@ -318,5 +317,5 @@ def _yn(value: bool | str | None) -> str | None:
         return "Y" if value else "N"
     text = str(value).strip().upper()
     if text not in {"Y", "N"}:
-        raise KrAddrRequestError('boolean Juso options must be True/False, "Y", or "N"')
+        raise KrAddrRequestError('Juso 불리언 옵션은 True/False, "Y", "N" 중 하나여야 합니다')
     return text

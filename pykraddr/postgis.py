@@ -1,4 +1,4 @@
-"""PostgreSQL/PostGIS loaders for legal-dong codes and GIS boundaries."""
+"""법정동코드와 GIS 경계를 PostgreSQL/PostGIS에 적재하는 기능."""
 
 from __future__ import annotations
 
@@ -57,9 +57,9 @@ DEFAULT_LEGAL_DONG_ALIASES = (
         "source_system": "vworld_n3a",
         "source_layer": "sido",
         "source_code": "3600000000",
-        "source_name": "Sejong Special Self-Governing City",
+        "source_name": "세종특별자치시",
         "legal_dong_code": "3611000000",
-        "reason": "VWorld/N3A sido boundary code differs from code.go.kr legal-dong master.",
+        "reason": "VWorld/N3A 시도 경계 코드가 code.go.kr 법정동 마스터와 다릅니다.",
     },
 )
 BOUNDARY_CODE_COLUMN_CANDIDATES = (
@@ -78,7 +78,7 @@ BOUNDARY_NAME_COLUMN_CANDIDATES = ("NAME", "BJD_NM", "법정동명", "ADM_NM", "
 
 @dataclass(frozen=True, slots=True)
 class BoundaryLoadResult:
-    """Summary of one or more boundary ZIP loads."""
+    """하나 이상의 경계 ZIP 적재 결과 요약."""
 
     loaded: int = 0
     matched: int = 0
@@ -91,7 +91,7 @@ class BoundaryLoadResult:
 
 @dataclass(slots=True)
 class PostGISLegalDongStore:
-    """SQLAlchemy 2/PostGIS store for legal-dong code and boundary data."""
+    """법정동코드와 경계 데이터를 다루는 SQLAlchemy 2/PostGIS 저장소."""
 
     url_or_engine: str | Engine
     schema: str | None = "public"
@@ -133,10 +133,10 @@ class PostGISLegalDongStore:
         self.create_mapping_issues_view()
 
     def reset(self, *, recreate: bool = False) -> None:
-        """Reset PostGIS legal-dong tables.
+        """PostGIS 법정동 테이블을 초기화한다.
 
-        ``recreate=True`` drops the configured schema first, which is the most
-        reliable path for full validation runs after schema changes.
+        ``recreate=True``는 설정된 스키마를 먼저 삭제한다. 스키마 변경 뒤
+        전체 검증을 다시 돌릴 때 가장 확실한 경로다.
         """
 
         if recreate:
@@ -247,7 +247,7 @@ class PostGISLegalDongStore:
         return count
 
     def load_default_aliases(self) -> int:
-        """Load built-in source-code aliases that point at CSV master codes."""
+        """CSV 마스터 코드를 가리키는 내장 소스 코드 별칭을 적재한다."""
 
         return self.upsert_legal_dong_aliases(DEFAULT_LEGAL_DONG_ALIASES)
 
@@ -297,7 +297,7 @@ class PostGISLegalDongStore:
         batch_size: int = 20_000,
         source_system: str = "vworld_n3a",
     ) -> BoundaryLoadResult:
-        """Load zipped shapefiles with GeoPandas and map BJCD/source codes to FK codes."""
+        """압축된 SHP를 GeoPandas로 읽고 BJCD/소스 코드를 FK 코드로 매핑한다."""
 
         if replace:
             with self.engine.begin() as connection:
@@ -322,7 +322,7 @@ class PostGISLegalDongStore:
             code_column = _pick_column(frame.columns, BOUNDARY_CODE_COLUMN_CANDIDATES)
             name_column = _pick_column(frame.columns, BOUNDARY_NAME_COLUMN_CANDIDATES)
             if code_column is None:
-                raise ValueError(f"{path}: legal-dong code column was not found")
+                raise ValueError(f"{path}: 법정동코드 컬럼을 찾지 못했습니다")
             source_layer = boundary_level_from_path(path)
             source_file = Path(path).name
             files.append(source_file)
@@ -555,15 +555,15 @@ def make_postgis_metadata(*, schema: str | None = "public", srid: int = 5179) ->
 
 
 def read_boundary_zip(path: str | Path, *, srid: int = 5179, encoding: str = "cp949") -> Any:
-    """Read one zipped shapefile with GeoPandas and normalize geometry to geom."""
+    """압축된 SHP 하나를 GeoPandas로 읽고 지오메트리 컬럼명을 geom으로 맞춘다."""
 
     try:
         import geopandas as gpd  # type: ignore[import-untyped]
         from shapely.geometry import MultiPolygon, Polygon  # type: ignore[import-untyped]
     except ImportError as exc:
         raise RuntimeError(
-            "geopandas and shapely are required for boundary ZIP loading. "
-            "Install pykraddr[postgis]."
+            "경계 ZIP 적재에는 geopandas와 shapely가 필요합니다. "
+            "pykraddr[postgis]를 설치하세요."
         ) from exc
 
     archive_path = Path(path)
@@ -572,7 +572,7 @@ def read_boundary_zip(path: str | Path, *, srid: int = 5179, encoding: str = "cp
             archive.extractall(tmp)
         shp_files = list(Path(tmp).glob("*.shp"))
         if not shp_files:
-            raise ValueError(f"{archive_path}: shapefile member was not found")
+            raise ValueError(f"{archive_path}: SHP 파일을 찾지 못했습니다")
         frame = gpd.read_file(shp_files[0], encoding=encoding)
     if frame.crs is None:
         frame = frame.set_crs(epsg=srid, allow_override=True)
@@ -606,7 +606,7 @@ def resolve_legal_dong_code(
     legal_status: dict[str, bool],
     alias_lookup: dict[tuple[str, str], str],
 ) -> tuple[str | None, str]:
-    """Resolve a boundary source code to the CSV-master legal-dong code."""
+    """경계 소스 코드를 CSV 마스터 법정동코드로 해석한다."""
 
     code = source_code.strip()
     if code in legal_status:
@@ -645,7 +645,7 @@ def _geometry_type(srid: int) -> Any:
     try:
         from geoalchemy2 import Geometry
     except ImportError as exc:
-        raise RuntimeError("geoalchemy2 is required for PostGIS support") from exc
+        raise RuntimeError("PostGIS 지원에는 geoalchemy2가 필요합니다") from exc
     return Geometry("MULTIPOLYGON", srid=srid, spatial_index=True)
 
 

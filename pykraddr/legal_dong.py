@@ -1,4 +1,4 @@
-"""data.go.kr legal-dong code download and CSV parsing helpers."""
+"""data.go.kr 법정동코드 다운로드와 CSV 파싱 보조 기능."""
 
 from __future__ import annotations
 
@@ -33,12 +33,12 @@ LEGAL_DONG_FIELD_ALIASES = {
 
 
 class DataGoKrLegalDongClient:
-    """Small helper for data.go.kr legal-dong file/API retrieval.
+    """data.go.kr 법정동 파일과 API를 가져오기 위한 작은 클라이언트.
 
-    The file page can be downloaded manually without login, while the
-    auto-converted OpenAPI requires a data.go.kr service key. This client keeps
-    both paths explicit: use ``download_file`` for a known CSV URL, or
-    ``iter_openapi_rows`` with the OpenAPI URL issued by data.go.kr.
+    파일 페이지는 로그인 없이 수동 다운로드가 가능하지만, 자동 변환 OpenAPI는
+    data.go.kr 서비스키가 필요하다. 이 클라이언트는 두 경로를 분리해서 다룬다.
+    이미 알고 있는 CSV URL은 ``download_file``로 받고, data.go.kr에서 발급한
+    OpenAPI URL은 ``iter_openapi_rows``에 넘긴다.
     """
 
     def __init__(
@@ -64,14 +64,14 @@ class DataGoKrLegalDongClient:
         *,
         overwrite: bool = False,
     ) -> Path:
-        """Download a known data.go.kr CSV/ZIP file URL."""
+        """알고 있는 data.go.kr CSV/ZIP 파일 URL을 내려받는다."""
 
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and not overwrite:
             return path
         response = self.session.get(url, timeout=self.timeout, stream=True)
-        raise_for_http_error(response, "download legal dong file")
+        raise_for_http_error(response, "법정동 파일 다운로드")
         path.write_bytes(bytes(response.content))
         return path
 
@@ -83,16 +83,16 @@ class DataGoKrLegalDongClient:
         per_page: int = 1000,
         extra_params: Mapping[str, Any] | None = None,
     ) -> Iterator[Mapping[str, Any]]:
-        """Yield rows from a data.go.kr auto-converted OpenAPI endpoint.
+        """data.go.kr 자동 변환 OpenAPI 엔드포인트에서 행을 순회한다.
 
-        data.go.kr exposes file datasets as JSON APIs after 활용신청. The exact
-        endpoint contains an API-specific path, so callers pass the issued
-        ``api_url`` instead of relying on a hard-coded URL.
+        data.go.kr는 활용 신청 이후 파일 데이터셋을 JSON API로 노출한다.
+        실제 엔드포인트는 API별 경로를 포함하므로, 고정 URL을 쓰지 않고
+        발급받은 ``api_url``을 호출자가 직접 전달한다.
         """
 
         key = service_key or self.service_key
         if not key:
-            raise ValueError("data.go.kr service key is required for OpenAPI retrieval")
+            raise ValueError("OpenAPI 조회에는 data.go.kr 서비스키가 필요합니다")
         page = 1
         while True:
             params = {
@@ -107,8 +107,8 @@ class DataGoKrLegalDongClient:
                 params=without_none(params),
                 timeout=self.timeout,
             )
-            raise_for_http_error(response, "fetch legal dong OpenAPI rows")
-            payload = response_json(response, "fetch legal dong OpenAPI rows")
+            raise_for_http_error(response, "법정동 OpenAPI 행 조회")
+            payload = response_json(response, "법정동 OpenAPI 행 조회")
             rows = _extract_rows(payload)
             if not rows:
                 return
@@ -134,7 +134,7 @@ def iter_legal_dong_records(
     *,
     encoding: str | None = None,
 ) -> Iterator[LegalDongRecord]:
-    """Stream legal-dong code rows from a CSV file or ZIP containing CSV files."""
+    """CSV 파일 또는 CSV가 들어 있는 ZIP에서 법정동코드 행을 스트리밍한다."""
 
     for member in _iter_csv_members(_content_bytes(path)):
         selected = _choose_encoding(member.content, encoding)
@@ -144,7 +144,7 @@ def iter_legal_dong_records(
             continue
         header_map = _header_map(reader.fieldnames)
         if "legal_dong_code" not in header_map:
-            raise KrAddrParseError(f"{member.name}: legal dong code column was not found")
+            raise KrAddrParseError(f"{member.name}: 법정동코드 컬럼을 찾지 못했습니다")
         for raw_row in reader:
             normalized = _normalize_row(raw_row, header_map)
             code = normalized.get("legal_dong_code", "")
@@ -164,7 +164,7 @@ def iter_legal_dong_records(
 
 
 def records_from_openapi_rows(rows: Iterable[Mapping[str, Any]]) -> Iterator[LegalDongRecord]:
-    """Normalize rows already fetched from data.go.kr JSON/XML converted APIs."""
+    """data.go.kr JSON/XML 변환 API에서 이미 받은 행을 정규화한다."""
 
     rows = iter(rows)
     try:
@@ -224,7 +224,7 @@ def _choose_encoding(content: bytes, encoding: str | None) -> str:
             return candidate
         except UnicodeDecodeError as exc:
             last_error = exc
-    raise KrAddrParseError("legal dong CSV encoding could not be decoded") from last_error
+    raise KrAddrParseError("법정동 CSV 인코딩을 해석할 수 없습니다") from last_error
 
 
 def _header_map(fieldnames: Iterable[str]) -> dict[str, str]:
@@ -285,7 +285,7 @@ def _extract_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
                     return item
                 if isinstance(item, Mapping):
                     return [item]
-    raise KrAddrParseError("legal dong OpenAPI response did not contain rows")
+    raise KrAddrParseError("법정동 OpenAPI 응답에 행 데이터가 없습니다")
 
 
 def _int_or_none(value: Any) -> int | None:

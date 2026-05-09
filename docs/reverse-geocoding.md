@@ -1,60 +1,58 @@
-# Reverse Geocoding Design
+# 리버스 지오코딩 설계
 
-Date: 2026-05-09
+작성일: 2026-05-09
 
-This note documents how pykraddr resolves a coordinate to a road-name address.
-It is meant to be the first place future Codex sessions read before changing
-reverse-geocoding behavior.
+이 문서는 pykraddr가 좌표에서 도로명주소를 얻는 방식을 설명합니다. 이후 Codex
+세션에서 리버스 지오코딩 동작을 바꾸기 전에 먼저 읽어야 할 기준 문서입니다.
 
-## Finding
+## 결론
 
-An offline source does exist.
+오프라인 원천은 존재합니다.
 
-The Juso "provided address" page lists coordinate-bearing datasets:
+Juso "제공하는 주소" 페이지에는 좌표를 포함한 TXT 자료가 있습니다.
 
-- `위치정보요약DB (.txt)`: road-name address and coordinate summary DB for
-  location-based services.
-- `내비게이션용DB (.txt)`: building-level road-name address data with building
-  center, main entrance, and auxiliary entrance coordinates.
-- `도로명주소 출입구 정보 (.txt)`: road-name address entrance coordinates.
+- `위치정보요약DB (.txt)`: 위치 기반 서비스용 도로명주소와 좌표 요약 DB
+- `내비게이션용DB (.txt)`: 건물 중심, 주출입구, 보조출입구 좌표를 포함한
+  건물 단위 도로명주소 자료
+- `도로명주소 출입구 정보 (.txt)`: 도로명주소 출입구 좌표
 
-The same page documents that the navigation DB building table includes:
+같은 페이지의 스키마 설명에 따르면 내비게이션용DB 건물정보 테이블은 다음
+값들을 포함합니다.
 
-- road-name code
-- underground flag
-- building main/sub number
-- postal code
-- building management number
-- building center x/y
-- entrance x/y
-- movement reason code `31`, `34`, `63`
+- 도로명코드
+- 지하여부
+- 건물 본번/부번
+- 우편번호
+- 건물 관리번호
+- 건물 중심 x/y
+- 출입구 x/y
+- 변동 사유 코드 `31`, `34`, `63`
 
-Source:
+공식 자료:
 
-- [Juso provided address data](https://business.juso.go.kr/addrlink/elctrnMapProvd/geoDBDwldList.do?menu=%EA%B5%AC%EC%97%AD%EC%9D%98+%EB%8F%84%ED%98%95)
+- [Juso 제공하는 주소](https://business.juso.go.kr/addrlink/elctrnMapProvd/geoDBDwldList.do?menu=%EA%B5%AC%EC%97%AD%EC%9D%98+%EB%8F%84%ED%98%95)
 
-## Implemented Strategy
+## 구현 전략
 
-pykraddr now uses an offline-first design:
+pykraddr는 오프라인 우선 방식을 사용합니다.
 
-1. Load Juso navigation DB building TXT rows into PostGIS
-   `road_address_points`.
-2. Reverse geocode a WGS84 lon/lat point by nearest-neighbor search against
-   `road_address_points.geom`.
-3. If the offline table is not configured or no row is within the configured
-   distance, call VWorld through `pyvworld`.
+1. Juso 내비게이션용DB 건물정보 TXT를 PostGIS `road_address_points`에 적재합니다.
+2. WGS84 lon/lat 좌표를 받아 `road_address_points.geom`에서 최근접 주소점을
+   찾습니다.
+3. 오프라인 테이블이 설정되지 않았거나, 설정한 거리 안에 주소점이 없으면
+   `pyvworld`를 통해 VWorld를 호출합니다.
 
-The VWorld fallback uses pyvworld's `VworldClient.reverse_geocode_latlon()`,
-which calls VWorld Geocoder API 2.0 `getaddress`.
+VWorld 보조 호출은 pyvworld의 `VworldClient.reverse_geocode_latlon()`을 사용하며,
+내부적으로 VWorld Geocoder API 2.0 `getaddress`를 호출합니다.
 
-Source:
+참고:
 
-- [VWorld API reference](https://www.vworld.kr/dev/v4apiRefer.do)
-- [pyvworld repository](https://github.com/digitie/pyvworld)
+- [VWorld API 참조](https://www.vworld.kr/dev/v4apiRefer.do)
+- [pyvworld 저장소](https://github.com/digitie/pyvworld)
 
 ## Python API
 
-### Offline Address Points
+### 오프라인 주소점
 
 ```python
 from pykraddr import RoadAddressPointStore
@@ -72,21 +70,21 @@ with RoadAddressPointStore(url, schema="kraddr") as store:
     print(address.road_address if address else None)
 ```
 
-`RoadAddressPointStore` stores authoritative points in EPSG:5179 because Juso
-documents the navigation DB coordinates as GRS80 UTM-K. The convenience method
-`nearest_road_address(lon=..., lat=...)` accepts EPSG:4326 and transforms the
-query point inside PostGIS.
+`RoadAddressPointStore`는 권위 주소점을 EPSG:5179로 저장합니다. Juso
+내비게이션용DB 좌표가 GRS80 UTM-K 기준이기 때문입니다. 편의 메서드
+`nearest_road_address(lon=..., lat=...)`는 EPSG:4326을 입력받고, PostGIS 내부에서
+질의 좌표를 변환합니다.
 
-### VWorld Fallback
+### VWorld 보조 호출
 
-Install pyvworld from the local sibling repo or GitHub until it is published to
-the package index:
+pyvworld가 패키지 인덱스에 배포되기 전까지는 로컬 형제 저장소 또는 GitHub에서
+설치합니다.
 
 ```bash
 python -m pip install "git+https://github.com/digitie/pyvworld.git"
 ```
 
-Then:
+사용 예시:
 
 ```python
 from pykraddr import VWorldReverseGeocoder
@@ -96,14 +94,14 @@ result = geocoder.reverse_road_address(lon=127.1013, lat=37.4023)
 print(result.road_address if result else None)
 ```
 
-Required environment variables are handled by pyvworld:
+pyvworld가 읽는 환경 변수:
 
 ```bash
-VWORLD_API_KEY="issued-key"
-VWORLD_DOMAIN="registered-domain-if-needed"
+VWORLD_API_KEY="발급받은 키"
+VWORLD_DOMAIN="필요한 경우 등록 도메인"
 ```
 
-### Offline-First Wrapper
+### 오프라인 우선 래퍼
 
 ```python
 from pykraddr import ReverseGeocoder, RoadAddressPointStore, VWorldReverseGeocoder
@@ -117,7 +115,7 @@ with RoadAddressPointStore(url, schema="kraddr") as store:
     result = geocoder.reverse_road_address(lon=127.1013, lat=37.4023)
 ```
 
-## PostGIS Table
+## PostGIS 테이블
 
 `road_address_points`:
 
@@ -144,74 +142,70 @@ loaded_at
 geom geometry(Point, 5179)
 ```
 
-Indexes:
+인덱스:
 
 ```text
 building_management_number PK
 ix_road_address_points_legal_dong
 ix_road_address_points_road_lookup
 ix_road_address_points_source
-GiST index on geom
+geom GiST index
 ```
 
-`coordinate_source` is:
+`coordinate_source` 값:
 
-- `entrance`: primary entrance x/y was present.
-- `center`: entrance was missing and building center x/y was used.
+- `entrance`: 주출입구 x/y가 있습니다.
+- `center`: 주출입구가 없어 건물 중심 x/y를 사용했습니다.
 
-## TXT Loading Rules
+## TXT 적재 규칙
 
-`iter_navigation_building_records()` reads TXT or ZIP bytes. It uses the Juso
-navigation DB building layout and skips non-building members whose line length
-is shorter than the building-info schema.
+`iter_navigation_building_records()`는 TXT 또는 ZIP 바이트를 읽습니다. Juso
+내비게이션용DB 건물정보 레이아웃을 기준으로 하며, 건물정보 스키마보다 필드가
+짧은 다른 멤버는 건너뜁니다.
 
-Full load:
+전체 적재:
 
 ```python
 store.load_navigation_building_archive(path, replace=True)
 ```
 
-Daily changes:
+일변동 반영:
 
 ```python
 records = iter_navigation_building_records(path)
 store.apply_navigation_building_changes(records)
 ```
 
-Movement-code behavior:
+변동 코드 동작:
 
-| Code | Meaning | Behavior |
+| 코드 | 의미 | 동작 |
 | --- | --- | --- |
-| `31` | new | upsert |
-| `34` | changed | upsert |
-| `63` | deleted | delete by building management number |
+| `31` | 신규 | 삽입 또는 갱신 |
+| `34` | 변경 | 삽입 또는 갱신 |
+| `63` | 삭제 | 건물 관리번호로 삭제 |
 
-## Query Semantics
+## 질의 의미
 
-Offline reverse geocoding is a nearest-address-point lookup, not a parcel
-containment operation. This is appropriate for "which road-name address should
-be shown for this pin?" but not for cadastral legal analysis.
+오프라인 리버스 지오코딩은 최근접 주소점 조회입니다. "이 핀에 표시할
+도로명주소가 무엇인가?"에 적합하지만, 법적 필지 판정에는 적합하지 않습니다.
 
-Use a conservative `max_offline_distance_m`, usually 30-50m in dense urban
-areas. Larger values may produce surprising matches across rivers, roads, or
-large parcels.
+도심에서는 `max_offline_distance_m`을 30-50m 정도로 보수적으로 두는 것이
+좋습니다. 값을 너무 크게 잡으면 하천, 큰 도로, 넓은 필지를 건너 의외의 주소가
+매칭될 수 있습니다.
 
-For parcel-level reverse geocoding, add cadastral polygon data keyed by PNU and
-query with `ST_Contains` or `ST_Covers`. That is intentionally separate from
-road-name address-point lookup.
+필지 단위 리버스 지오코딩은 PNU 키를 가진 지적 폴리곤을 적재한 뒤
+`ST_Contains` 또는 `ST_Covers`로 별도 처리해야 합니다.
 
-## Validation Status
+## 검증 상태
 
-Implemented tests cover:
+테스트로 확인한 항목:
 
-- navigation DB building TXT/ZIP parsing
-- entrance-to-center coordinate fallback
-- PostGIS metadata for `road_address_points`
-- VWorld response parsing through a fake pyvworld client
-- offline-first fallback behavior
-- WSL2 Docker PostGIS smoke test for table creation, one-row load, and nearest
-  address lookup
+- 내비게이션용DB 건물정보 TXT/ZIP 파싱
+- 출입구 좌표가 없을 때 건물 중심 좌표로 대체
+- `road_address_points` PostGIS 메타데이터
+- 모의 pyvworld 클라이언트를 통한 VWorld 응답 파싱
+- 오프라인 우선 보조 호출 동작
+- WSL2 Docker PostGIS에서 테이블 생성, 1건 적재, 최근접 주소 조회
 
-Live VWorld calls require `VWORLD_API_KEY`; no key was present in the local
-environment during this implementation, so network calls are intentionally
-covered by mock tests.
+실제 VWorld 호출은 `VWORLD_API_KEY`가 필요합니다. 구현 당시 로컬 환경에 키가
+없었으므로 네트워크 호출은 모의 테스트로 검증했습니다.

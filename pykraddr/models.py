@@ -1,4 +1,4 @@
-"""Public models for Juso API responses and address TXT rows."""
+"""Juso API 응답과 주소 TXT 행을 표현하는 공개 모델."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def _float(raw: Mapping[str, Any], key: str) -> float | None:
 
 @dataclass(frozen=True, slots=True)
 class JusoPage(Generic[T]):
-    """A paginated Juso search API response."""
+    """페이지 단위 Juso 검색 API 응답."""
 
     items: tuple[T, ...]
     total_count: int
@@ -78,7 +78,7 @@ class JusoPage(Generic[T]):
 
 @dataclass(frozen=True, slots=True)
 class LegalDongRecord:
-    """One legal-dong code row from data.go.kr/code.go.kr style CSV files."""
+    """data.go.kr/code.go.kr 형식 CSV의 법정동코드 한 행."""
 
     legal_dong_code: str
     legal_dong_name: str
@@ -132,7 +132,7 @@ class LegalDongRecord:
 
 @dataclass(frozen=True, slots=True)
 class AddressSearchResult:
-    """One row from the road-name address search API."""
+    """도로명주소 검색 API의 한 행."""
 
     road_address: str | None
     road_address_part1: str | None
@@ -198,7 +198,7 @@ class AddressSearchResult:
 
 @dataclass(frozen=True, slots=True)
 class EnglishAddressSearchResult:
-    """One row from the English address search API."""
+    """영문주소 검색 API의 한 행."""
 
     road_address: str | None
     jibun_address: str | None
@@ -242,7 +242,7 @@ class EnglishAddressSearchResult:
 
 @dataclass(frozen=True, slots=True)
 class AddressCoordinate:
-    """One row from the coordinate search API."""
+    """좌표 검색 API의 한 행."""
 
     administrative_code: str | None
     road_name_code: str | None
@@ -276,7 +276,7 @@ class AddressCoordinate:
 
 @dataclass(frozen=True, slots=True)
 class DetailAddress:
-    """One row from the detail-address search API."""
+    """상세주소 검색 API의 한 행."""
 
     administrative_code: str | None
     road_name_code: str | None
@@ -308,7 +308,7 @@ class DetailAddress:
 
 @dataclass(frozen=True, slots=True)
 class DatasetFile:
-    """One downloadable address dataset file advertised by business.juso.go.kr."""
+    """business.juso.go.kr에 공지된 다운로드 가능 주소 데이터셋 파일."""
 
     data_detail_sn: str
     data_kind_code: str
@@ -338,7 +338,7 @@ class DatasetFile:
 
 @dataclass(frozen=True, slots=True)
 class RoadNameAddressKoreanRecord:
-    """A row from road-name address Korean master/change TXT files."""
+    """도로명주소 한글 전체분/변동분 TXT의 한 행."""
 
     road_address_management_number: str
     legal_dong_code: str
@@ -388,7 +388,7 @@ class RoadNameAddressKoreanRecord:
 
 @dataclass(frozen=True, slots=True)
 class RelatedJibunRecord:
-    """A row from related-jibun TXT files for road-name address Korean data."""
+    """도로명주소 한글 데이터의 관련 지번 TXT 한 행."""
 
     road_address_management_number: str
     legal_dong_code: str

@@ -17,20 +17,20 @@ from pykraddr.reverse import (
 def _navigation_line(**overrides: str) -> str:
     values = {
         "jurisdiction_emd_code": "4113510900",
-        "sido_name": "Gyeonggi-do",
-        "sigungu_name": "Seongnam-si Bundang-gu",
-        "eup_myeon_dong_name": "Sampyeong-dong",
+        "sido_name": "경기도",
+        "sigungu_name": "성남시 분당구",
+        "eup_myeon_dong_name": "삼평동",
         "road_name_code": "411354340327",
-        "road_name": "Pangyoyeok-ro",
+        "road_name": "판교역로",
         "underground_yn": "0",
         "building_main_no": "235",
         "building_sub_no": "0",
         "postal_code": "13494",
         "building_management_number": "4113510900106810000000001",
-        "sigungu_building_name": "Alpha Building",
-        "building_use": "office",
+        "sigungu_building_name": "알파빌딩",
+        "building_use": "업무시설",
         "administrative_dong_code": "4113565500",
-        "administrative_dong_name": "Sampyeong-dong",
+        "administrative_dong_name": "삼평동",
         "ground_floor_count": "10",
         "underground_floor_count": "2",
         "apartment_kind_code": "0",
@@ -43,10 +43,10 @@ def _navigation_line(**overrides: str) -> str:
         "building_center_y": "1943000.000000",
         "entrance_x": "965010.000000",
         "entrance_y": "1943010.000000",
-        "sido_name_en": "Gyeonggi-do",
-        "sigungu_name_en": "Seongnam-si Bundang-gu",
-        "eup_myeon_dong_name_en": "Sampyeong-dong",
-        "road_name_en": "Pangyoyeok-ro",
+        "sido_name_en": "",
+        "sigungu_name_en": "",
+        "eup_myeon_dong_name_en": "",
+        "road_name_en": "",
         "eup_myeon_dong_type": "1",
         "change_reason_code": "31",
     }
@@ -72,9 +72,7 @@ def test_navigation_building_parser_and_address_text() -> None:
     assert len(rows) == 1
     assert rows[0].building_number == "235"
     assert rows[0].point_xy() == (965010.0, 1943010.0)
-    assert rows[0].road_address == (
-        "Gyeonggi-do Seongnam-si Bundang-gu Pangyoyeok-ro 235 (Alpha Building)"
-    )
+    assert rows[0].road_address == "경기도 성남시 분당구 판교역로 235 (알파빌딩)"
 
 
 def test_navigation_building_parser_falls_back_to_center_point() -> None:
@@ -115,7 +113,7 @@ def test_vworld_reverse_geocoder_parses_road_response() -> None:
                 "result": [
                     {
                         "type": "road",
-                        "text": "Gyeonggi-do Seongnam-si Bundang-gu Pangyoyeok-ro 235",
+                        "text": "경기도 성남시 분당구 판교역로 235",
                         "zipcode": "13494",
                     }
                 ],
@@ -128,7 +126,7 @@ def test_vworld_reverse_geocoder_parses_road_response() -> None:
 
     assert result is not None
     assert result.source == "vworld"
-    assert result.road_address == "Gyeonggi-do Seongnam-si Bundang-gu Pangyoyeok-ro 235"
+    assert result.road_address == "경기도 성남시 분당구 판교역로 235"
     assert result.postal_code == "13494"
     assert client.calls[0]["type"] == "both"
 
@@ -153,7 +151,7 @@ def test_reverse_geocoder_prefers_offline_result() -> None:
     offline = FakeOfflineStore(
         ReverseGeocodeResult(
             address_type="road",
-            road_address="offline address",
+            road_address="오프라인 주소",
             source="juso_navigation_db",
         )
     )
@@ -166,7 +164,7 @@ def test_reverse_geocoder_prefers_offline_result() -> None:
 
     assert result is not None
     assert result.source == "juso_navigation_db"
-    assert result.road_address == "offline address"
+    assert result.road_address == "오프라인 주소"
     assert offline.calls == 1
     assert vworld.client.calls == []
 
@@ -178,7 +176,7 @@ def test_reverse_geocoder_uses_vworld_when_offline_misses() -> None:
             {
                 "response": {
                     "status": "OK",
-                    "result": [{"type": "road", "text": "online address"}],
+                    "result": [{"type": "road", "text": "온라인 주소"}],
                 }
             }
         )
@@ -189,4 +187,4 @@ def test_reverse_geocoder_uses_vworld_when_offline_misses() -> None:
 
     assert result is not None
     assert result.source == "vworld"
-    assert result.road_address == "online address"
+    assert result.road_address == "온라인 주소"

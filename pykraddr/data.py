@@ -1,4 +1,4 @@
-"""Download and parse road-name address Korean TXT datasets."""
+"""도로명주소 한글 TXT 데이터셋 다운로드와 파싱."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ RELATED_JIBUN_COLUMNS = (
 
 
 class RoadNameAddressDataClient:
-    """Client for Juso road-name address Korean full and daily TXT downloads."""
+    """Juso 도로명주소 한글 전체분과 일변동 TXT 다운로드 클라이언트."""
 
     def __init__(
         self,
@@ -85,7 +85,7 @@ class RoadNameAddressDataClient:
         data_detail_sn: str = ROAD_NAME_KOREAN_DETAIL_SN,
         expand: bool = False,
     ) -> Mapping[str, Any]:
-        """Return the raw file-list response for a data detail and year/month."""
+        """자료 상세 번호와 연월에 대한 파일 목록 원본 응답을 반환한다."""
 
         body = {
             "rtlDtaDtlSn": data_detail_sn,
@@ -103,7 +103,7 @@ class RoadNameAddressDataClient:
         payload = response_json(response, "selectAttrbDBDwldList")
         results = payload.get("results")
         if not isinstance(results, Mapping):
-            raise KrAddrParseError("selectAttrbDBDwldList: results was not an object")
+            raise KrAddrParseError("selectAttrbDBDwldList: results가 객체가 아닙니다")
         return results
 
     def latest_full_file(
@@ -112,7 +112,7 @@ class RoadNameAddressDataClient:
         today: date | None = None,
         max_lookback_months: int = 36,
     ) -> DatasetFile:
-        """Find the latest available monthly full road-name address Korean ZIP."""
+        """다운로드 가능한 최신 월 전체분 도로명주소 한글 ZIP을 찾는다."""
 
         current = today or date.today()
         year = current.year
@@ -127,7 +127,7 @@ class RoadNameAddressDataClient:
             if candidates:
                 return max(candidates, key=lambda item: item.standard_date)
             year, month = _previous_month(year, month)
-        raise KrAddrNoDataError("no monthly full road-name address Korean file was found")
+        raise KrAddrNoDataError("월 전체분 도로명주소 한글 파일을 찾지 못했습니다")
 
     def daily_files(
         self,
@@ -135,7 +135,7 @@ class RoadNameAddressDataClient:
         year: int | str,
         month: int | str,
     ) -> list[DatasetFile]:
-        """List available daily change files for one month."""
+        """한 달 안에서 다운로드 가능한 일변동 파일 목록을 반환한다."""
 
         results = self.list_files(year=year, month=month)
         possible = _rows(results.get("possibleDataList"))
@@ -147,7 +147,7 @@ class RoadNameAddressDataClient:
         ]
 
     def daily_files_between(self, start: date, end: date) -> list[DatasetFile]:
-        """List daily change files whose standard dates are in ``[start, end]``."""
+        """기준일이 ``[start, end]`` 범위에 있는 일변동 파일을 반환한다."""
 
         if end < start:
             return []
@@ -169,7 +169,7 @@ class RoadNameAddressDataClient:
         overwrite: bool = False,
         chunk_size: int = 1024 * 1024,
     ) -> Path:
-        """Download one advertised dataset file and return the local ZIP path."""
+        """목록에 공지된 데이터셋 파일 하나를 내려받고 로컬 ZIP 경로를 반환한다."""
 
         output = Path(output_dir)
         output.mkdir(parents=True, exist_ok=True)
@@ -184,7 +184,7 @@ class RoadNameAddressDataClient:
             timeout=self.timeout,
             stream=True,
         )
-        raise_for_http_error(response, f"download {file.file_name}")
+        raise_for_http_error(response, f"{file.file_name} 다운로드")
         iter_content = getattr(response, "iter_content", None)
         if callable(iter_content):
             with path.open("wb") as stream:
@@ -202,7 +202,7 @@ class RoadNameAddressDataClient:
         today: date | None = None,
         overwrite: bool = False,
     ) -> Path:
-        """Discover and download the latest monthly full Korean address ZIP."""
+        """최신 월 전체분 한글 주소 ZIP을 찾아 내려받는다."""
 
         return self.download_file(
             self.latest_full_file(today=today),
@@ -218,7 +218,7 @@ class RoadNameAddressDataClient:
         end: date,
         overwrite: bool = False,
     ) -> list[Path]:
-        """Download daily change ZIPs for a date range."""
+        """날짜 범위에 해당하는 일변동 ZIP들을 내려받는다."""
 
         return [
             self.download_file(file, output_dir, overwrite=overwrite)
@@ -231,7 +231,7 @@ def load_road_name_address_records(
     *,
     encoding: str | None = None,
 ) -> list[RoadNameAddressKoreanRecord]:
-    """Load all road-name address Korean records from a TXT or ZIP file."""
+    """TXT 또는 ZIP 파일에서 도로명주소 한글 레코드를 모두 읽어온다."""
 
     return list(iter_road_name_address_records(path, encoding=encoding))
 
@@ -241,7 +241,7 @@ def iter_road_name_address_records(
     *,
     encoding: str | None = None,
 ) -> Iterator[RoadNameAddressKoreanRecord]:
-    """Stream road-name address Korean records from a TXT or ZIP file."""
+    """TXT 또는 ZIP 파일에서 도로명주소 한글 레코드를 스트리밍한다."""
 
     for member in _iter_text_members(_content_bytes(path)):
         if _member_kind(member.name) != "road":
@@ -260,7 +260,7 @@ def load_related_jibun_records(
     *,
     encoding: str | None = None,
 ) -> list[RelatedJibunRecord]:
-    """Load all related-jibun records from a TXT or ZIP file."""
+    """TXT 또는 ZIP 파일에서 관련 지번 레코드를 모두 읽어온다."""
 
     return list(iter_related_jibun_records(path, encoding=encoding))
 
@@ -270,7 +270,7 @@ def iter_related_jibun_records(
     *,
     encoding: str | None = None,
 ) -> Iterator[RelatedJibunRecord]:
-    """Stream related-jibun records from a TXT or ZIP file."""
+    """TXT 또는 ZIP 파일에서 관련 지번 레코드를 스트리밍한다."""
 
     for member in _iter_text_members(_content_bytes(path)):
         if _member_kind(member.name) != "jibun":
@@ -285,7 +285,7 @@ def iter_related_jibun_records(
 
 
 def archive_standard_date(path: str | os.PathLike[str]) -> date | None:
-    """Infer a daily ``YYYYMMDD`` date from an archive or member name."""
+    """압축 파일명이나 내부 파일명에서 일변동 ``YYYYMMDD`` 날짜를 추정한다."""
 
     text = Path(path).name
     parsed = _first_yyyymmdd(text)
@@ -318,7 +318,7 @@ def _dataset_file(
     file_name = str(row.get("fileNm") or row.get("tmprFileNm") or "").strip()
     real_file_name = str(row.get("tmprFileNm") or row.get("fileNm") or "").strip()
     if not file_name or not real_file_name:
-        raise KrAddrParseError("dataset file row did not include a file name")
+        raise KrAddrParseError("데이터셋 파일 행에 파일명이 없습니다")
     registry_year = standard_date[:4]
     return DatasetFile(
         data_detail_sn=str(row.get("RTL_DTA_DTL_SN") or ROAD_NAME_KOREAN_DETAIL_SN),
@@ -367,7 +367,7 @@ def _rows(value: Any) -> list[Mapping[str, Any]]:
         return [value]
     if isinstance(value, list) and all(isinstance(row, Mapping) for row in value):
         return value
-    raise KrAddrParseError("dataset list value was not a list of objects")
+    raise KrAddrParseError("데이터셋 목록 값이 객체 목록이 아닙니다")
 
 
 def _is_existing_file(row: Mapping[str, Any]) -> bool:
@@ -431,7 +431,7 @@ def _choose_encoding(content: bytes, encoding: str | None) -> str:
             return candidate
         except UnicodeDecodeError as exc:
             last_error = exc
-    raise KrAddrParseError("TXT encoding could not be decoded") from last_error
+    raise KrAddrParseError("TXT 인코딩을 해석할 수 없습니다") from last_error
 
 
 def _validate_decoding(content: bytes, encoding: str) -> None:
@@ -452,7 +452,8 @@ def _is_no_data_parts(parts: list[str]) -> bool:
 def _road_record(parts: list[str], *, source_name: str) -> RoadNameAddressKoreanRecord:
     if len(parts) < len(ROAD_NAME_ADDRESS_COLUMNS):
         raise KrAddrParseError(
-            f"{source_name}: expected {len(ROAD_NAME_ADDRESS_COLUMNS)} fields, got {len(parts)}"
+            f"{source_name}: 필드 {len(ROAD_NAME_ADDRESS_COLUMNS)}개가 필요하지만 "
+            f"{len(parts)}개를 받았습니다"
         )
     values = parts[: len(ROAD_NAME_ADDRESS_COLUMNS)]
     return RoadNameAddressKoreanRecord(**dict(zip(ROAD_NAME_ADDRESS_COLUMNS, values, strict=True)))
@@ -461,7 +462,8 @@ def _road_record(parts: list[str], *, source_name: str) -> RoadNameAddressKorean
 def _related_jibun_record(parts: list[str], *, source_name: str) -> RelatedJibunRecord:
     if len(parts) < len(RELATED_JIBUN_COLUMNS):
         raise KrAddrParseError(
-            f"{source_name}: expected {len(RELATED_JIBUN_COLUMNS)} fields, got {len(parts)}"
+            f"{source_name}: 필드 {len(RELATED_JIBUN_COLUMNS)}개가 필요하지만 "
+            f"{len(parts)}개를 받았습니다"
         )
     values = parts[: len(RELATED_JIBUN_COLUMNS)]
     return RelatedJibunRecord(**dict(zip(RELATED_JIBUN_COLUMNS, values, strict=True)))

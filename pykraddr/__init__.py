@@ -1,4 +1,4 @@
-"""Python client and data loader for Korean Juso address information."""
+"""한국 주소 정보 API와 데이터 적재를 다루는 공개 진입점."""
 
 from __future__ import annotations
 
