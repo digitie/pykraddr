@@ -93,6 +93,24 @@ parcel_rows = store.find_road_addresses_by_pnu("1111010100000010000")
 코드를 처음 읽는 사람을 위한 전체 흐름 안내는
 [docs/code-guide-for-beginners.md](docs/code-guide-for-beginners.md)에 정리했습니다.
 
+## 웹 UI
+
+주소 탐색과 지도 표시를 위한 Next.js/Tailwind CSS 앱은 `web/` 디렉터리에 있고,
+PostgreSQL/PostGIS 조회 백엔드는 `backend/` 디렉터리에 있습니다.
+
+```bash
+cd backend
+uvicorn pykraddr_api.main:app --app-dir . --host 0.0.0.0 --port 3011 --reload
+
+cd web
+npm install
+npm run dev
+```
+
+WSL 실행 기준 포트는 프론트엔드 `3010`, 백엔드 `3011`입니다. Kakao 지도 표시에는
+`NEXT_PUBLIC_KAKAO_JAVASCRIPT_KEY`가 필요합니다. 자세한 내용은 [web/README.md](web/README.md)와
+[backend/README.md](backend/README.md)를 참고하세요.
+
 ## 법정동코드와 PostGIS 경계
 
 PostGIS/GIS 적재 기능은 선택 의존성으로 제공됩니다.
