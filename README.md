@@ -177,7 +177,7 @@ with RoadAddressPointStore(url, schema="kraddr") as store:
 ```
 
 오프라인 테이블은 Juso 내비게이션용DB 건물정보 TXT 좌표를 사용합니다. 오프라인
-저장소가 없거나 가까운 주소점이 없으면 `pyvworld`를 통해 VWorld Geocoder API
+저장소가 없거나 가까운 주소점이 없으면 `python-vworld-api`를 통해 VWorld Geocoder API
 2.0을 호출할 수 있습니다. 자세한 설계는
 [docs/reverse-geocoding.md](docs/reverse-geocoding.md)를 참고하세요.
 

@@ -15,7 +15,7 @@
 - GeoPandas/PostGIS로 적재하는 VWorld/N3A 법정동 경계 SHP ZIP
 - 법정동코드 소스 차이를 다루는 `legal_dong_code_aliases`
 - Juso 내비게이션용DB 건물정보 TXT를 적재하는 `road_address_points`
-- `pyvworld`를 통한 VWorld 리버스 지오코딩 보조 호출
+- `python-vworld-api`를 통한 VWorld 리버스 지오코딩 보조 호출
 
 ## 가능한 일
 
@@ -50,7 +50,7 @@ Juso 내비게이션용DB 건물정보 TXT를 `road_address_points`에 적재하
 가장 가까운 도로명주소점을 찾을 수 있습니다.
 
 오프라인 주소점 저장소가 없거나 설정한 거리 안에 결과가 없으면
-`VWorldReverseGeocoder`가 `pyvworld`를 통해 VWorld Geocoder API 2.0을 호출할 수
+`VWorldReverseGeocoder`가 `python-vworld-api`를 통해 VWorld Geocoder API 2.0을 호출할 수
 있습니다.
 
 ## 아직 부족한 부분

@@ -40,15 +40,15 @@ kraddr.geo는 오프라인 우선 방식을 사용합니다.
 2. WGS84 lon/lat 좌표를 받아 `road_address_points.geom`에서 최근접 주소점을
    찾습니다.
 3. 오프라인 테이블이 설정되지 않았거나, 설정한 거리 안에 주소점이 없으면
-   `pyvworld`를 통해 VWorld를 호출합니다.
+   `python-vworld-api`를 통해 VWorld를 호출합니다.
 
-VWorld 보조 호출은 pyvworld의 `VworldClient.reverse_geocode_latlon()`을 사용하며,
+VWorld 보조 호출은 `vworld.VworldClient.reverse_geocode_latlon()`을 사용하며,
 내부적으로 VWorld Geocoder API 2.0 `getaddress`를 호출합니다.
 
 참고:
 
 - [VWorld API 참조](https://www.vworld.kr/dev/v4apiRefer.do)
-- [pyvworld 저장소](https://github.com/digitie/pyvworld)
+- [python-vworld-api 저장소](https://github.com/digitie/python-vworld-api)
 
 ## Python API
 
@@ -77,11 +77,11 @@ with RoadAddressPointStore(url, schema="kraddr") as store:
 
 ### VWorld 보조 호출
 
-pyvworld가 패키지 인덱스에 배포되기 전까지는 로컬 형제 저장소 또는 GitHub에서
+python-vworld-api가 패키지 인덱스에 배포되기 전까지는 로컬 형제 저장소 또는 GitHub에서
 설치합니다.
 
 ```bash
-python -m pip install "git+https://github.com/digitie/pyvworld.git"
+python -m pip install "git+https://github.com/digitie/python-vworld-api.git"
 ```
 
 사용 예시:
@@ -94,7 +94,7 @@ result = geocoder.reverse_road_address(lon=127.1013, lat=37.4023)
 print(result.road_address if result else None)
 ```
 
-pyvworld가 읽는 환경 변수:
+python-vworld-api가 읽는 환경 변수:
 
 ```bash
 VWORLD_API_KEY="발급받은 키"
@@ -203,7 +203,7 @@ store.apply_navigation_building_changes(records)
 - 내비게이션용DB 건물정보 TXT/ZIP 파싱
 - 출입구 좌표가 없을 때 건물 중심 좌표로 대체
 - `road_address_points` PostGIS 메타데이터
-- 모의 pyvworld 클라이언트를 통한 VWorld 응답 파싱
+- 모의 vworld 클라이언트를 통한 VWorld 응답 파싱
 - 오프라인 우선 보조 호출 동작
 - WSL2 Docker PostGIS에서 테이블 생성, 1건 적재, 최근접 주소 조회
 

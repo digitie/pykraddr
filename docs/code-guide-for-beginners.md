@@ -304,7 +304,7 @@ legal_dong_code = 3611000000
 
 - `reverse.py`
 - `postgis.py`
-- 선택 의존성 `pyvworld`
+- 선택 의존성 `python-vworld-api`
 
 흐름:
 
@@ -428,7 +428,7 @@ ReverseGeocoder.reverse_road_address()
 | 법정동 CSV 컬럼 alias 추가 | `legal_dong.py` | `models.py` |
 | 법정동 경계 매핑 수정 | `postgis.py` | `docs/legal-dong-postgis-report.md` |
 | 주소점 리버스 지오코딩 개선 | `reverse.py` | `docs/reverse-geocoding.md` |
-| 외부 API 보조 호출 변경 | `reverse.py` | `pyvworld` |
+| 외부 API 보조 호출 변경 | `reverse.py` | `python-vworld-api` |
 
 ## 테스트를 읽는 순서
 

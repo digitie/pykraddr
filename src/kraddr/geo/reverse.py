@@ -406,7 +406,7 @@ class RoadAddressPointStore:
 
 
 class VWorldReverseGeocoder:
-    """선택 의존성인 ``pyvworld`` 패키지를 사용하는 리버스 지오코더."""
+    """선택 의존성인 ``python-vworld-api`` 패키지를 사용하는 리버스 지오코더."""
 
     def __init__(
         self,
@@ -420,33 +420,33 @@ class VWorldReverseGeocoder:
             self.client = client
             return
         try:
-            from pyvworld import VworldClient  # type: ignore[import-not-found]
+            from vworld import VworldClient  # type: ignore[import-not-found]
         except ImportError as exc:
             raise KrAddrRequestError(
-                "VWorld 리버스 지오코딩에는 pyvworld가 필요합니다. "
-                "https://github.com/digitie/pyvworld 에서 설치하세요."
+                "VWorld 리버스 지오코딩에는 python-vworld-api가 필요합니다. "
+                "https://github.com/digitie/python-vworld-api 에서 설치하세요."
             ) from exc
         self.client = VworldClient(api_key=api_key, domain=domain, timeout=timeout)
 
     @classmethod
     def from_env(cls, **kwargs: Any) -> VWorldReverseGeocoder:
         try:
-            from pyvworld import VworldClient
+            from vworld import VworldClient
         except ImportError as exc:
             raise KrAddrRequestError(
-                "VWorld 리버스 지오코딩에는 pyvworld가 필요합니다. "
-                "https://github.com/digitie/pyvworld 에서 설치하세요."
+                "VWorld 리버스 지오코딩에는 python-vworld-api가 필요합니다. "
+                "https://github.com/digitie/python-vworld-api 에서 설치하세요."
             ) from exc
         return cls(client=VworldClient.from_env(**kwargs))
 
     @classmethod
     def from_env_file(cls, path: str | Path = ".env", **kwargs: Any) -> VWorldReverseGeocoder:
         try:
-            from pyvworld import VworldClient
+            from vworld import VworldClient
         except ImportError as exc:
             raise KrAddrRequestError(
-                "VWorld 리버스 지오코딩에는 pyvworld가 필요합니다. "
-                "https://github.com/digitie/pyvworld 에서 설치하세요."
+                "VWorld 리버스 지오코딩에는 python-vworld-api가 필요합니다. "
+                "https://github.com/digitie/python-vworld-api 에서 설치하세요."
             ) from exc
         return cls(client=VworldClient.from_env_file(path, **kwargs))
 
