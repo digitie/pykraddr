@@ -16,9 +16,8 @@ kraddr.geo는 대한민국 주소 데이터를 세 가지 방식으로 다룹니
 
 1. Juso 검색 API를 호출합니다.
 2. Juso와 data.go.kr에서 내려받은 대용량 TXT/CSV/ZIP 자료를 파싱합니다.
-3. PostgreSQL/PostGIS에 적재해서 오프라인 주소 검색, 법정동 경계 조회,
-   리버스 지오코딩의 기반 DB를 만듭니다. SQLite 파일은 테스트와 이전 버전
-   호환 경로로만 남겨 둡니다.
+3. SQLite 또는 PostgreSQL/PostGIS에 적재해서 오프라인 주소 검색, 법정동 경계
+   조회, 리버스 지오코딩의 기반 DB를 만듭니다.
 
 처음 볼 때 중요한 관점은 "주소 문자열"보다 "식별자"입니다. 이 코드베이스는
 사용자가 입력하는 주소 문자열을 직접 믿기보다, 국가 표준 식별자인 법정동코드,
@@ -122,12 +121,8 @@ src/kraddr/geo/
   exceptions.py    라이브러리 공통 예외
   models.py        API 응답과 TXT/CSV 행 모델
   client.py        Juso 검색 API 클라이언트
-  parser.py        raw response를 모델로 바꾸는 replay 가능 파서
-  processor.py     parsed model을 snapshot 비교용 결과로 가공
-  debug.py         request/response/parsed/processed를 담는 DebugRun
-  fixtures.py      DebugRun 결과를 pytest replay fixture로 저장
   data.py          도로명주소 한글 TXT/ZIP 다운로드와 파싱
-  store.py         도로명주소 한글 PostgreSQL 저장소와 일변동 반영
+  store.py         도로명주소 한글 SQLite 저장소와 일변동 반영
   legal_dong.py    법정동 CSV/API 파싱
   postgis.py       법정동 CSV와 SHP 경계의 PostGIS 적재
   reverse.py       주소점 적재와 리버스 지오코딩
@@ -137,7 +132,7 @@ src/kraddr/geo/
 
 1. `models.py`: 어떤 데이터가 오가는지 먼저 봅니다.
 2. `data.py`: Juso TXT 파일을 어떻게 레코드로 바꾸는지 봅니다.
-3. `store.py`: 레코드를 PostgreSQL 테이블에 어떻게 넣는지 봅니다.
+3. `store.py`: 레코드를 SQLite 테이블에 어떻게 넣는지 봅니다.
 4. `legal_dong.py`: 법정동 CSV를 어떻게 표준 모델로 바꾸는지 봅니다.
 5. `postgis.py`: 법정동/경계 데이터를 PostGIS에 어떻게 넣는지 봅니다.
 6. `reverse.py`: 주소점과 VWorld 보조 호출이 어떻게 연결되는지 봅니다.
@@ -159,7 +154,7 @@ src/kraddr/geo/
 KrAddrClient.search()
   -> _get_page()
   -> _http.response_json()
-  -> parser.parse_page()
+  -> _parse_page()
   -> AddressSearchResult.from_api()
 ```
 
@@ -177,16 +172,6 @@ print(first.building_management_number)
 
 이 흐름은 온라인 API 응답을 모델 객체로 바꾸는 경로입니다. 오프라인 DB 적재와는
 분리되어 있습니다.
-
-디버그 UI나 외부 도구에서 fixture를 만들 때는 `debug_search()`를 사용합니다.
-
-```text
-KrAddrClient.debug_search()
-  -> 원본 request/response 캡처
-  -> parser.parse_search_response()
-  -> processor.process_search_response()
-  -> DebugRun
-```
 
 ### 2. 도로명주소 한글 전체분 적재
 
@@ -217,9 +202,8 @@ iter_related_jibun_records()
 - `related_jibuns`
 - `sync_metadata`
 
-이 흐름은 "전국 도로명주소 마스터 DB"를 만드는 작업입니다. 운영 기준 저장소는
-PostgreSQL이며, 대용량이므로 `data/` 디렉터리와 로컬 DB 덤프는 커밋하지
-않습니다.
+이 흐름은 "전국 도로명주소 마스터 DB"를 만드는 작업입니다. 기본 저장소는
+SQLite이며, 대용량이므로 `data/` 디렉터리는 커밋하지 않습니다.
 
 ### 3. 일변동 반영
 
@@ -439,9 +423,8 @@ ReverseGeocoder.reverse_road_address()
 | --- | --- | --- |
 | Juso 검색 API 파라미터 추가 | `client.py` | `models.py`, `_http.py` |
 | API 응답 모델 필드 추가 | `models.py` | `client.py`, 테스트 |
-| DebugRun/fixture 출력 변경 | `debug.py` | `parser.py`, `processor.py`, `fixtures.py` |
 | 도로명주소 TXT 컬럼 변경 대응 | `data.py` | `models.py`, `store.py` |
-| PostgreSQL 저장소 인덱스 추가 | `store.py` | `docs/address-db-schema.md` |
+| SQLite 저장소 인덱스 추가 | `store.py` | `docs/address-db-schema.md` |
 | 법정동 CSV 컬럼 alias 추가 | `legal_dong.py` | `models.py` |
 | 법정동 경계 매핑 수정 | `postgis.py` | `docs/legal-dong-postgis-report.md` |
 | 주소점 리버스 지오코딩 개선 | `reverse.py` | `docs/reverse-geocoding.md` |
@@ -454,9 +437,7 @@ ReverseGeocoder.reverse_road_address()
 ```text
 tests/test_client.py       Juso API 응답 파싱
 tests/test_data.py         TXT/ZIP 파서
-tests/test_store.py        저장소 적재와 일변동 반영
-tests/test_debug_fixtures.py DebugRun과 fixture writer
-tests/test_generated_fixtures.py fixture replay runner
+tests/test_store.py        SQLite 적재와 일변동 반영
 tests/test_legal_dong.py   법정동 CSV/API 행 정규화
 tests/test_postgis.py      PostGIS 메타데이터와 별칭 매핑
 tests/test_reverse.py      주소점 파서와 리버스 지오코딩

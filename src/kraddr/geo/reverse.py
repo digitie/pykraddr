@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -421,7 +420,7 @@ class VWorldReverseGeocoder:
             self.client = client
             return
         try:
-            VworldClient = _vworld_client_class()
+            from vworld import VworldClient  # type: ignore[import-not-found]
         except ImportError as exc:
             raise KrAddrRequestError(
                 "VWorld 리버스 지오코딩에는 python-vworld-api가 필요합니다. "
@@ -432,7 +431,7 @@ class VWorldReverseGeocoder:
     @classmethod
     def from_env(cls, **kwargs: Any) -> VWorldReverseGeocoder:
         try:
-            VworldClient = _vworld_client_class()
+            from vworld import VworldClient
         except ImportError as exc:
             raise KrAddrRequestError(
                 "VWorld 리버스 지오코딩에는 python-vworld-api가 필요합니다. "
@@ -443,7 +442,7 @@ class VWorldReverseGeocoder:
     @classmethod
     def from_env_file(cls, path: str | Path = ".env", **kwargs: Any) -> VWorldReverseGeocoder:
         try:
-            VworldClient = _vworld_client_class()
+            from vworld import VworldClient
         except ImportError as exc:
             raise KrAddrRequestError(
                 "VWorld 리버스 지오코딩에는 python-vworld-api가 필요합니다. "
@@ -711,11 +710,6 @@ def _point_element(x: float, y: float, srid: int) -> Any:
     except ImportError as exc:
         raise RuntimeError("오프라인 리버스 지오코딩에는 geoalchemy2가 필요합니다") from exc
     return WKTElement(f"POINT({x} {y})", srid=srid)
-
-
-def _vworld_client_class() -> Any:
-    module: Any = import_module("vworld")
-    return module.VworldClient
 
 
 def _xy(x: str, y: str) -> tuple[float, float] | None:

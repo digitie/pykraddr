@@ -20,7 +20,6 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine, RowMapping
 
@@ -60,8 +59,8 @@ JIBUN_DERIVED_COLUMNS = (
 class RoadNameAddressStore:
     """전체분 적재와 일별 증분 갱신을 처리하는 SQLAlchemy 2 저장소.
 
-    운영 기준 백엔드는 PostgreSQL이다. 기존 테스트/레거시 SQLite 파일도 열 수
-    있도록 SQLAlchemy 2 Core 테이블, 엔진, 트랜잭션, 방언별 upsert를 사용한다.
+    기본 백엔드는 SQLite다. 주소 DB를 휴대하기 쉽게 유지하면서도 SQLAlchemy 2
+    Core 테이블, 엔진, 트랜잭션, 방언별 upsert를 사용한다.
     """
 
     def __init__(self, path: str | os.PathLike[str] | Engine) -> None:
@@ -69,9 +68,9 @@ class RoadNameAddressStore:
         if isinstance(path, Engine):
             self.engine = path
         else:
-            self.engine = _create_engine(path)
-            if self.engine.dialect.name == "sqlite" and not _is_sqlalchemy_url(path):
-                self.path = Path(path)
+            self.path = Path(path)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.engine = create_engine(f"sqlite:///{self.path}", future=True)
         self.metadata = _make_metadata()
         self.road_table = self.metadata.tables[ROAD_TABLE]
         self.jibun_table = self.metadata.tables[JIBUN_TABLE]
@@ -110,7 +109,7 @@ class RoadNameAddressStore:
         replace: bool = True,
         batch_size: int = 10_000,
     ) -> dict[str, int]:
-        """월 전체분 ZIP/TXT를 저장소에 적재한다.
+        """월 전체분 ZIP/TXT를 SQLite에 적재한다.
 
         ``replace``가 참이면 기존 저장소 내용을 먼저 제거한다.
         """
@@ -302,7 +301,7 @@ class RoadNameAddressStore:
             return 0
         target = self.metadata.tables[table]
         values = [_row_values(table, columns, row) for row in rows]
-        statement = _insert_for_engine(self.engine, target).values(values)
+        statement = sqlite_insert(target).values(values)
         primary_key_columns = set(target.primary_key.columns.keys())
         update_values = {
             column: getattr(statement.excluded, column)
@@ -351,10 +350,7 @@ class RoadNameAddressStore:
         return len(rows)
 
     def _upsert_metadata(self, connection: Any, key: str, value: str) -> None:
-        statement = _insert_for_engine(self.engine, self.sync_metadata_table).values(
-            key=key,
-            value=value,
-        )
+        statement = sqlite_insert(self.sync_metadata_table).values(key=key, value=value)
         connection.execute(
             statement.on_conflict_do_update(
                 index_elements=[self.sync_metadata_table.c.key],
@@ -396,16 +392,11 @@ class RoadNameAddressStore:
         """이전 버전으로 적재한 DB의 코드/PNU 파생 컬럼을 채운다.
 
         새 전체분/일변동 적재는 upsert 중에 이 컬럼들을 채운다. 이 헬퍼는
-        월 전체분을 다시 적재하지 않고 기존 DB를 업그레이드할 때 유용하다.
+        월 전체분을 다시 적재하지 않고 기존 SQLite DB를 업그레이드할 때 유용하다.
         """
 
-        if self.engine.dialect.name not in {"sqlite", "postgresql"}:
-            raise NotImplementedError(
-                "backfill_derived_columns는 현재 SQLite와 PostgreSQL만 지원합니다"
-            )
-        if self.engine.dialect.name == "postgresql":
-            self._backfill_derived_columns_postgresql()
-            return
+        if self.engine.dialect.name != "sqlite":
+            raise NotImplementedError("backfill_derived_columns는 현재 SQLite만 지원합니다")
         with self.engine.begin() as connection:
             connection.execute(
                 text(
@@ -439,46 +430,6 @@ class RoadNameAddressStore:
                         pnu = legal_dong_code || mountain_yn
                               || printf('%04d', CAST(lot_main_no AS INTEGER))
                               || printf('%04d', CAST(lot_sub_no AS INTEGER))
-                    """
-                )
-            )
-
-    def _backfill_derived_columns_postgresql(self) -> None:
-        with self.engine.begin() as connection:
-            connection.execute(
-                text(
-                    f"""
-                    UPDATE {ROAD_TABLE}
-                    SET
-                        building_management_number = road_address_management_number,
-                        sido_code = substring(legal_dong_code from 1 for 2),
-                        sigungu_code = substring(legal_dong_code from 1 for 5),
-                        eup_myeon_dong_code = substring(legal_dong_code from 1 for 8),
-                        ri_code = substring(legal_dong_code from 9 for 2),
-                        road_sigungu_code = substring(road_name_code from 1 for 5),
-                        road_number = substring(road_name_code from 6),
-                        pnu = legal_dong_code
-                              || substring(coalesce(nullif(mountain_yn, ''), '0') from 1 for 1)
-                              || lpad(coalesce(nullif(lot_main_no, ''), '0'), 4, '0')
-                              || lpad(coalesce(nullif(lot_sub_no, ''), '0'), 4, '0')
-                    """
-                )
-            )
-            connection.execute(
-                text(
-                    f"""
-                    UPDATE {JIBUN_TABLE}
-                    SET
-                        sido_code = substring(legal_dong_code from 1 for 2),
-                        sigungu_code = substring(legal_dong_code from 1 for 5),
-                        eup_myeon_dong_code = substring(legal_dong_code from 1 for 8),
-                        ri_code = substring(legal_dong_code from 9 for 2),
-                        road_sigungu_code = substring(road_name_code from 1 for 5),
-                        road_number = substring(road_name_code from 6),
-                        pnu = legal_dong_code
-                              || substring(coalesce(nullif(mountain_yn, ''), '0') from 1 for 1)
-                              || lpad(coalesce(nullif(lot_main_no, ''), '0'), 4, '0')
-                              || lpad(coalesce(nullif(lot_sub_no, ''), '0'), 4, '0')
                     """
                 )
             )
@@ -562,27 +513,6 @@ def _make_metadata() -> MetaData:
         Column("updated_at", DateTime(timezone=True), default=lambda: datetime.now(UTC)),
     )
     return metadata
-
-
-def _create_engine(target: str | os.PathLike[str]) -> Engine:
-    if _is_sqlalchemy_url(target):
-        return create_engine(str(target), future=True)
-    path = Path(target)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(f"sqlite:///{path}", future=True)
-
-
-def _is_sqlalchemy_url(target: str | os.PathLike[str]) -> bool:
-    text_value = str(target)
-    return "://" in text_value or text_value.startswith(("postgresql+", "sqlite+"))
-
-
-def _insert_for_engine(engine: Engine, table: Table) -> Any:
-    if engine.dialect.name == "sqlite":
-        return sqlite_insert(table)
-    if engine.dialect.name == "postgresql":
-        return postgresql_insert(table)
-    raise NotImplementedError(f"{engine.dialect.name} upsert는 아직 지원하지 않습니다")
 
 
 def _batched_write(records: Iterable[Any], *, batch_size: int, writer: Any) -> int:

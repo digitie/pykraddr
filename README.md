@@ -4,10 +4,9 @@
 `business.juso.go.kr`에서 내려받을 수 있는 "도로명주소 한글" TXT 자료를
 다루는 비공식 Python 라이브러리입니다.
 
-외부 시스템에서는 REST 서버가 아니라 Python 패키지로 import해서 사용하는 것을
-기준으로 둡니다. 팝업 API는 의도적으로 감싸지 않으며, Juso 검색 클라이언트,
-다운로드 자료 파싱, PostgreSQL/PostGIS 적재, 경계/주소점 조회, fixture 기반
-회귀 테스트 흐름에 집중합니다.
+팝업 API는 의도적으로 감싸지 않습니다. 서버에서 호출하기 쉬운 검색 API,
+다운로드 자료 파싱, 데이터베이스 적재, PostGIS 기반 경계/주소점 조회에
+집중합니다.
 
 ## 문서 작성 원칙
 
@@ -46,21 +45,13 @@ print(coords.items[0].x, coords.items[0].y)
 
 ## 도로명주소 한글 자료
 
-PostgreSQL 드라이버가 필요하면 다음 extra를 설치합니다.
-
-```bash
-python -m pip install "python-kraddr-geo[postgres]"
-```
-
 ```python
 from kraddr.geo import RoadNameAddressDataClient, RoadNameAddressStore
-
-POSTGRES_URL = "postgresql+psycopg://postgres:postgres@localhost:55433/kraddr_geo"
 
 data = RoadNameAddressDataClient()
 zip_path = data.download_latest_full("data/juso")
 
-with RoadNameAddressStore(POSTGRES_URL) as store:
+with RoadNameAddressStore("data/juso/rnaddrkor.sqlite") as store:
     store.load_full_archive(zip_path, replace=True)
     print(store.count_road_addresses())
 ```
@@ -80,16 +71,15 @@ paths = data.download_daily_changes(
     end=date(2026, 4, 30),
 )
 
-with RoadNameAddressStore(POSTGRES_URL) as store:
+with RoadNameAddressStore("data/juso/rnaddrkor.sqlite") as store:
     for path in paths:
         store.apply_daily_archive(path)
 ```
 
-`RoadNameAddressStore`는 SQLAlchemy 2 Core를 사용하며 운영 기준 저장소는
-PostgreSQL입니다. 기존 SQLAlchemy `Engine`이나 SQLAlchemy URL을 직접 넘길 수
-있습니다. 공식 TXT 컬럼을 보존하고, `sigungu_code`, `road_number`,
-`building_management_number`, `pnu` 같은 조회용 파생 키를 추가로 인덱싱합니다.
-SQLite 파일 경로는 테스트와 이전 버전 호환을 위해서만 유지합니다.
+`RoadNameAddressStore`는 SQLAlchemy 2 Core를 사용하며 기본 저장소는
+SQLite입니다. 기존 SQLAlchemy `Engine`을 직접 넘길 수도 있습니다. 공식 TXT
+컬럼을 보존하고, `sigungu_code`, `road_number`, `building_management_number`,
+`pnu` 같은 조회용 파생 키를 추가로 인덱싱합니다.
 
 자주 쓰는 조회 헬퍼:
 
@@ -103,40 +93,10 @@ parcel_rows = store.find_road_addresses_by_pnu("1111010100000010000")
 코드를 처음 읽는 사람을 위한 전체 흐름 안내는
 [docs/code-guide-for-beginners.md](docs/code-guide-for-beginners.md)에 정리했습니다.
 
-## DebugRun과 fixture replay
-
-디버그 UI나 외부 도구는 라이브러리의 `debug_*()` 메서드를 호출해 원본 요청,
-원본 응답, parsed result, processed result를 한 번에 받을 수 있습니다.
-
-```python
-from kraddr.geo import KrAddrClient, save_fixture
-
-client = KrAddrClient.from_env("JUSO_CONFM_KEY")
-run = client.debug_search("세종대로 110", add_info=True)
-
-save_fixture(
-    base_dir="tests/fixtures",
-    function_name=run.function,
-    case_name="search_sejong_normal",
-    description="세종대로 정상 검색 케이스",
-    input_data=run.input,
-    request_data=run.request,
-    response_data=run.response,
-    parsed_result=run.parsed,
-    processed_result=run.processed,
-)
-```
-
-fixture JSON에는 API key와 토큰 계열 값이 저장되지 않습니다. 기본 테스트는
-`tests/fixtures/**/*.json`을 읽어 외부 API 호출 없이 raw response를 parser와
-processor에 다시 넣는 replay 방식으로 동작합니다.
-
-## React 웹 UI
+## 웹 UI
 
 주소 탐색과 지도 표시를 위한 Next.js/Tailwind CSS 앱은 `web/` 디렉터리에 있고,
-문서에 있던 Streamlit 앱은 추가하지 않습니다. `backend/`는 React 화면을 로컬에서
-확인하기 위한 선택 어댑터이며, 이 패키지의 외부 사용 방식은 Python 라이브러리
-import입니다.
+PostgreSQL/PostGIS 조회 백엔드는 `backend/` 디렉터리에 있습니다.
 
 ```bash
 cd backend

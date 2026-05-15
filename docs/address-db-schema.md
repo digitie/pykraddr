@@ -16,9 +16,8 @@
 - 공급자 TXT 컬럼은 손실 없이 보존합니다.
 - 매번 계산하기 비싼 식별자 조각은 파생 컬럼으로 저장합니다.
 - SQLAlchemy 2 Core 테이블과 명시적 인덱스를 사용합니다.
-- 운영 기준 저장소는 PostgreSQL입니다. PostGIS 확장이 필요한 공간 데이터와
-  일반 주소 마스터를 같은 PostgreSQL 계열에서 다루되, SQLite 파일은 테스트와
-  이전 버전 호환 경로로만 유지합니다.
+- SQLite는 기본 내장 저장소로 유지하되, PostGIS 확장이 필요한 공간 데이터는
+  PostgreSQL/PostGIS에 분리합니다.
 - 월 전체분은 기준 스냅샷으로 보고, 일변동 자료는 변동 사유 코드에 따라
   증분 반영합니다.
 - 공급자 식별자 이력을 보존하고, 임의 로컬 대체키를 만들지 않습니다.
@@ -328,11 +327,10 @@ updated_at
 ```python
 from kraddr.geo import RoadNameAddressDataClient, RoadNameAddressStore
 
-url = "postgresql+psycopg://postgres:postgres@localhost:55433/kraddr_geo"
 data = RoadNameAddressDataClient()
 zip_path = data.download_latest_full("data/juso/full")
 
-with RoadNameAddressStore(url) as store:
+with RoadNameAddressStore("data/juso/rnaddrkor.sqlite") as store:
     counts = store.load_full_archive(zip_path, replace=True)
     print(counts)
 ```
@@ -359,14 +357,13 @@ with RoadNameAddressStore(url) as store:
 ```python
 from datetime import date
 
-url = "postgresql+psycopg://postgres:postgres@localhost:55433/kraddr_geo"
 paths = data.download_daily_changes(
     "data/juso/daily",
     start=date(2026, 4, 1),
     end=date(2026, 5, 6),
 )
 
-with RoadNameAddressStore(url) as store:
+with RoadNameAddressStore("data/juso/rnaddrkor.sqlite") as store:
     for path in paths:
         print(path, store.apply_daily_archive(path))
 ```
@@ -410,16 +407,11 @@ jibun_rows = store.find_related_jibuns_by_pnu("1111010100000010000")
 지역 필터는 `sigungu_code`나 `eup_myeon_dong_code`에서 시작하는 것이 좋습니다.
 전국 테이블에서 표시 이름만으로 먼저 필터링하지 않습니다.
 
-## 기존 SQLite 호환과 PostgreSQL 이전
+## 기존 SQLite 업그레이드
 
-이전 버전이 만든 SQLite DB는 테스트와 마이그레이션 확인용으로 계속 열 수
-있습니다. 다만 운영 기준은 PostgreSQL이므로, 장기적으로는 최신 월 전체분을
-PostgreSQL에 다시 적재하고 이후 일변동 파일을 순서대로 재생하는 방식을
-권장합니다.
-
-이전 DB를 임시로 열면 `RoadNameAddressStore`가 SQLite 누락 파생 컬럼과 인덱스를
-추가합니다. 이미 적재된 행은 전체 재적재 또는 backfill 전까지 파생 컬럼이 비어
-있을 수 있습니다.
+이전 버전이 만든 SQLite DB를 열면 `RoadNameAddressStore`가 누락된 파생 컬럼과
+인덱스를 추가합니다. 다만 이전 버전으로 이미 적재된 행은 전체 재적재 또는
+backfill 전까지 파생 컬럼이 비어 있을 수 있습니다.
 
 다시 내려받지 않고 채우기:
 
@@ -430,12 +422,8 @@ with RoadNameAddressStore("data/juso/rnaddrkor.sqlite") as store:
     store.backfill_derived_columns()
 ```
 
-PostgreSQL에서도 같은 메서드를 사용할 수 있습니다.
-
-```python
-with RoadNameAddressStore(url) as store:
-    store.backfill_derived_columns()
-```
+운영용 재구축은 최신 월 전체분을 다시 적재하고, 그 이후 일변동 파일을 순서대로
+재생하는 방식을 권장합니다.
 
 ## Codex 유지보수 체크리스트
 
@@ -448,7 +436,7 @@ with RoadNameAddressStore(url) as store:
 6. 조회 헬퍼를 추가할 때는 Python 필터링보다 인덱스를 우선 고려합니다.
 7. 일변동 동작을 바꿀 때는 `31`, `34`, `63`, `No Data` 멤버를 모두 테스트합니다.
 8. 문서와 docstring은 한글로 작성합니다. 기술 식별자만 원문을 유지합니다.
-9. `data/`와 로컬 DB 덤프는 커밋하지 않습니다. 실제 주소 마스터는 GB 단위입니다.
+9. `data/`는 커밋하지 않습니다. 실제 SQLite DB는 GB 단위입니다.
 10. 푸시 전에는 다음 검사를 실행합니다.
 
 ```powershell
