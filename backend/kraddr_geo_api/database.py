@@ -27,6 +27,12 @@ PERFORMANCE_SQL = (
     where is_active is true
     """,
     """
+    create index if not exists ix_juso_road_legal_mgmt_prefix
+    on public.address_serving_juso_road_address
+    (legal_dong_code text_pattern_ops, road_address_management_no)
+    where is_active is true
+    """,
+    """
     create index if not exists ix_juso_road_road_code_prefix
     on public.address_serving_juso_road_address (road_name_code text_pattern_ops)
     where is_active is true
@@ -57,6 +63,52 @@ PERFORMANCE_SQL = (
     create index if not exists ix_juso_road_full_legal_trgm
     on public.address_serving_juso_road_address
     using gin (lower(coalesce(full_legal_dong_name, '')) gin_trgm_ops)
+    where is_active is true
+    """,
+    """
+    create index if not exists ix_juso_road_search_all_trgm
+    on public.address_serving_juso_road_address
+    using gin (
+        (lower(coalesce(full_road_address, '') || ' ' || coalesce(full_legal_dong_name, '')))
+        gin_trgm_ops
+    )
+    where is_active is true
+    """,
+    """
+    create index if not exists ix_juso_road_search_all_compact_trgm
+    on public.address_serving_juso_road_address
+    using gin (
+        (replace(
+            lower(coalesce(full_road_address, '') || ' ' || coalesce(full_legal_dong_name, '')),
+            ' ',
+            ''
+        ))
+        gin_trgm_ops
+    )
+    where is_active is true
+    """,
+    """
+    create index if not exists ix_juso_road_search_road_trgm
+    on public.address_serving_juso_road_address
+    using gin (
+        (lower(coalesce(full_road_address, '') || ' ' || coalesce(road_name, '')))
+        gin_trgm_ops
+    )
+    where is_active is true
+    """,
+    """
+    create index if not exists ix_juso_road_search_road_compact_trgm
+    on public.address_serving_juso_road_address
+    using gin (
+        (replace(lower(coalesce(full_road_address, '') || ' ' || coalesce(road_name, '')), ' ', ''))
+        gin_trgm_ops
+    )
+    where is_active is true
+    """,
+    """
+    create index if not exists ix_juso_road_search_legal_compact_trgm
+    on public.address_serving_juso_road_address
+    using gin ((replace(lower(coalesce(full_legal_dong_name, '')), ' ', '')) gin_trgm_ops)
     where is_active is true
     """,
     """
@@ -162,8 +214,22 @@ def list_addresses(
     normalized_page = max(page, 1)
     normalized_page_size = max(1, min(page_size, 100))
     offset = (normalized_page - 1) * normalized_page_size
-    where_sql, params = _where_clause(query=query, scope=scope)
+
+    region_ranges: list[tuple[str, str]] = []
+    if query.strip():
+        with engine().connect() as connection:
+            region_ranges = _region_code_ranges(connection, query=query, scope=scope)
+    where_sql, params = _where_clause(
+        query=query,
+        scope=scope,
+        region_ranges=region_ranges,
+    )
     params.update({"limit": normalized_page_size + 1, "offset": offset})
+    order_sql = (
+        "r.legal_dong_code, r.road_address_management_no"
+        if region_ranges
+        else "r.road_address_management_no"
+    )
 
     items_sql = sa.text(
         f"""
@@ -188,7 +254,7 @@ def list_addresses(
                 r.full_road_address
             from public.address_serving_juso_road_address as r
             where {where_sql}
-            order by r.road_address_management_no
+            order by {order_sql}
             limit :limit offset :offset
         )
         select
@@ -239,7 +305,7 @@ def list_addresses(
                 end
             limit 1
         ) as b on true
-        order by r.road_address_management_no
+        order by {order_sql}
         """
     )
     count_sql = sa.text(
@@ -316,59 +382,236 @@ def where_sql_is_active_only(query: str) -> bool:
     return not query.strip()
 
 
-def _where_clause(*, query: str, scope: str) -> tuple[str, dict[str, Any]]:
+def _where_clause(
+    *,
+    query: str,
+    scope: str,
+    region_ranges: list[tuple[str, str]] | None = None,
+) -> tuple[str, dict[str, Any]]:
     conditions = ["r.is_active is true"]
     params: dict[str, Any] = {}
     value = query.strip()
     if not value:
         return " and ".join(conditions), params
 
+    if region_ranges:
+        conditions.append(_region_range_clause(region_ranges, params))
+        return " and ".join(conditions), params
+
     like = f"%{_escape_like(value.lower())}%"
-    prefix = f"{_escape_like(value)}%"
-    params.update({"like": like, "prefix": prefix})
+    compact_value = _compact_search_value(value)
+    params["like"] = like
+    if _use_compact_search(compact_value):
+        params["compact_like"] = f"%{_escape_like(compact_value)}%"
+    if _use_code_prefix_search(value):
+        params["prefix"] = f"{_escape_like(value)}%"
+
     if scope == "road":
-        conditions.append(
-            """
-            (
-                lower(coalesce(r.full_road_address, '')) like :like escape '\\'
-                or lower(coalesce(r.road_name, '')) like :like escape '\\'
-            )
-            """
-        )
+        predicates = [
+            _road_search_expression() + " like :like escape '\\'",
+        ]
+        if "compact_like" in params:
+            predicates.append(_road_compact_search_expression() + " like :compact_like escape '\\'")
+        conditions.append(_or_clause(predicates))
     elif scope == "jibun":
-        conditions.append(
-            """
-            (
-                lower(coalesce(r.full_legal_dong_name, '')) like :like escape '\\'
-                or r.legal_dong_code like :prefix escape '\\'
+        predicates = [
+            "lower(coalesce(r.full_legal_dong_name, '')) like :like escape '\\'",
+        ]
+        if "compact_like" in params:
+            predicates.append(
+                "replace(lower(coalesce(r.full_legal_dong_name, '')), ' ', '') "
+                "like :compact_like escape '\\'"
             )
-            """
-        )
+        if "prefix" in params:
+            predicates.append("r.legal_dong_code like :prefix escape '\\'")
+        conditions.append(_or_clause(predicates))
     elif scope == "code":
-        conditions.append(
-            """
-            (
-                r.legal_dong_code like :prefix escape '\\'
-                or r.road_name_code like :prefix escape '\\'
-                or r.road_address_management_no like :prefix escape '\\'
-                or r.postal_code like :prefix escape '\\'
-            )
-            """
-        )
+        if "prefix" not in params:
+            conditions.append("false")
+        else:
+            conditions.append(_code_prefix_clause())
     else:
-        conditions.append(
-            """
-            (
-                lower(coalesce(r.full_road_address, '')) like :like escape '\\'
-                or lower(coalesce(r.full_legal_dong_name, '')) like :like escape '\\'
-                or r.legal_dong_code like :prefix escape '\\'
-                or r.road_name_code like :prefix escape '\\'
-                or r.road_address_management_no like :prefix escape '\\'
-                or r.postal_code like :prefix escape '\\'
+        predicates = [
+            _all_search_expression() + " like :like escape '\\'",
+        ]
+        if "compact_like" in params:
+            predicates.append(_all_compact_search_expression() + " like :compact_like escape '\\'")
+        if "prefix" in params:
+            predicates.extend(
+                [
+                    "r.legal_dong_code like :prefix escape '\\'",
+                    "r.road_name_code like :prefix escape '\\'",
+                    "r.road_address_management_no like :prefix escape '\\'",
+                    "r.postal_code like :prefix escape '\\'",
+                ]
             )
-            """
-        )
+        conditions.append(_or_clause(predicates))
     return " and ".join(conditions), params
+
+
+def _region_code_ranges(
+    connection: sa.Connection,
+    *,
+    query: str,
+    scope: str,
+) -> list[tuple[str, str]]:
+    value = query.strip()
+    compact_value = _compact_search_value(value)
+    if (
+        scope not in {"all", "jibun"}
+        or len(compact_value) < 2
+        or _use_code_prefix_search(value)
+        or not _looks_like_region_query(compact_value)
+    ):
+        return []
+
+    rows = connection.execute(
+        sa.text(
+            """
+            select
+                boundary_level,
+                sido_code,
+                sigungu_code,
+                legal_dong_code
+            from public.region_serving_boundary
+            where
+                lower(coalesce(full_region_name, '')) like :like escape '\\'
+                or replace(lower(coalesce(full_region_name, '')), ' ', '')
+                    like :compact_like escape '\\'
+                or lower(coalesce(region_name, '')) like :like escape '\\'
+            order by
+                case boundary_level
+                    when 'sido' then 1
+                    when 'sigungu' then 2
+                    else 3
+                end,
+                length(coalesce(full_region_name, ''))
+            limit 20
+            """
+        ),
+        {
+            "like": f"%{_escape_like(value.lower())}%",
+            "compact_like": f"%{_escape_like(compact_value)}%",
+        },
+    ).mappings().all()
+    if not rows:
+        return []
+
+    top_rank = _boundary_rank(str(rows[0]["boundary_level"] or ""))
+    top_rows = [
+        row for row in rows if _boundary_rank(str(row["boundary_level"] or "")) == top_rank
+    ]
+    if top_rank != 1 and (len(compact_value) < 5 or len(top_rows) > 10):
+        return []
+
+    prefixes = [_region_prefix(row) for row in top_rows]
+    unique_prefixes = sorted({prefix for prefix in prefixes if prefix})
+    return [(prefix, _next_text_prefix(prefix)) for prefix in unique_prefixes]
+
+
+def _boundary_rank(boundary_level: str) -> int:
+    if boundary_level == "sido":
+        return 1
+    if boundary_level == "sigungu":
+        return 2
+    return 3
+
+
+def _region_prefix(row: sa.RowMapping) -> str:
+    boundary_level = str(row["boundary_level"] or "")
+    if boundary_level == "sido":
+        return str(row["sido_code"] or "")[:2]
+    if boundary_level == "sigungu":
+        return str(row["sigungu_code"] or "")[:5]
+    return str(row["legal_dong_code"] or "")[:10]
+
+
+def _region_range_clause(ranges: list[tuple[str, str]], params: dict[str, Any]) -> str:
+    predicates: list[str] = []
+    for index, (start, end) in enumerate(ranges):
+        start_key = f"region_start_{index}"
+        end_key = f"region_end_{index}"
+        params[start_key] = start
+        params[end_key] = end
+        predicates.append(
+            f"(r.legal_dong_code >= :{start_key} and r.legal_dong_code < :{end_key})"
+        )
+    return _or_clause(predicates)
+
+
+def _next_text_prefix(value: str) -> str:
+    return value[:-1] + chr(ord(value[-1]) + 1)
+
+
+def _all_search_expression() -> str:
+    return "lower(coalesce(r.full_road_address, '') || ' ' || coalesce(r.full_legal_dong_name, ''))"
+
+
+def _all_compact_search_expression() -> str:
+    return (
+        "replace(lower(coalesce(r.full_road_address, '') || ' ' || "
+        "coalesce(r.full_legal_dong_name, '')), ' ', '')"
+    )
+
+
+def _road_search_expression() -> str:
+    return "lower(coalesce(r.full_road_address, '') || ' ' || coalesce(r.road_name, ''))"
+
+
+def _road_compact_search_expression() -> str:
+    return (
+        "replace(lower(coalesce(r.full_road_address, '') || ' ' || "
+        "coalesce(r.road_name, '')), ' ', '')"
+    )
+
+
+def _code_prefix_clause() -> str:
+    return _or_clause(
+        [
+            "r.legal_dong_code like :prefix escape '\\'",
+            "r.road_name_code like :prefix escape '\\'",
+            "r.road_address_management_no like :prefix escape '\\'",
+            "r.postal_code like :prefix escape '\\'",
+        ]
+    )
+
+
+def _or_clause(predicates: list[str]) -> str:
+    return "(\n                " + "\n                or ".join(predicates) + "\n            )"
+
+
+def _compact_search_value(value: str) -> str:
+    return "".join(value.lower().split())
+
+
+def _looks_like_region_query(compact_value: str) -> bool:
+    if len(compact_value) <= 2:
+        return True
+    return any(
+        hint in compact_value
+        for hint in (
+            "특별시",
+            "광역시",
+            "특별자치",
+            "자치도",
+            "자치시",
+            "시",
+            "군",
+            "구",
+            "읍",
+            "면",
+            "동",
+            "리",
+        )
+    )
+
+
+def _use_compact_search(compact_value: str) -> bool:
+    return len(compact_value) >= 4
+
+
+def _use_code_prefix_search(value: str) -> bool:
+    return any(character.isdigit() for character in value)
 
 
 def _row_to_address(row: sa.RowMapping) -> dict[str, Any]:

@@ -58,8 +58,8 @@ const defaultPageSize = 10;
 const pageSizeCookieName = "kraddr_geo_page_size";
 const pageSizeCookieMaxAge = 60 * 60 * 24 * 365;
 const pageSizeOptions = [5, 10, 20, 50, 100] as const;
-const minimumLoadingNoticeMs = 500;
-const searchDebounceMs = 350;
+const minimumLoadingNoticeMs = 0;
+const searchDebounceMs = 180;
 
 type PageSize = (typeof pageSizeOptions)[number];
 
