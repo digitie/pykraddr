@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, TypeVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ._http import SessionLike, build_session, raise_for_http_error, response_json, without_none
 from .exceptions import (
     KrAddrAuthError,
-    KrAddrParseError,
-    KrAddrRateLimitError,
     KrAddrRequestError,
-    KrAddrServerError,
 )
 from .models import (
     AddressCoordinate,
@@ -21,10 +19,21 @@ from .models import (
     EnglishAddressSearchResult,
     JusoPage,
 )
+from .parser import parse_page
+
+if TYPE_CHECKING:
+    from .debug import DebugRun
 
 DEFAULT_API_BASE_URL = "https://business.juso.go.kr/addrlink"
 DEFAULT_ENV_NAMES = ("JUSO_CONFM_KEY", "JUSO_API_KEY", "KRADDR_CONFM_KEY")
 T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class _ApiExchange:
+    request: dict[str, Any]
+    response: dict[str, Any]
+    body: Mapping[str, Any]
 
 
 class KrAddrClient:
@@ -95,6 +104,30 @@ class KrAddrClient:
         }
         return self._get_page("addrLinkApi.do", params, AddressSearchResult.from_api)
 
+    def debug_search(
+        self,
+        keyword: str,
+        *,
+        current_page: int = 1,
+        count_per_page: int = 10,
+        history: bool | str | None = None,
+        first_sort: str | None = None,
+        add_info: bool | str | None = None,
+    ) -> DebugRun:
+        """검색 호출을 실행하고 fixture 저장에 쓸 디버그 실행 결과를 반환한다."""
+
+        from .debug import debug_search
+
+        return debug_search(
+            self,
+            keyword,
+            current_page=current_page,
+            count_per_page=count_per_page,
+            history=history,
+            first_sort=first_sort,
+            add_info=add_info,
+        )
+
     def search_english(
         self,
         keyword: str,
@@ -108,6 +141,24 @@ class KrAddrClient:
             "keyword": _required_text(keyword, "keyword")
         }
         return self._get_page("addrEngApi.do", params, EnglishAddressSearchResult.from_api)
+
+    def debug_search_english(
+        self,
+        keyword: str,
+        *,
+        current_page: int = 1,
+        count_per_page: int = 10,
+    ) -> DebugRun:
+        """영문주소 검색 호출을 디버그 실행 결과로 반환한다."""
+
+        from .debug import debug_search_english
+
+        return debug_search_english(
+            self,
+            keyword,
+            current_page=current_page,
+            count_per_page=count_per_page,
+        )
 
     def coordinates(
         self,
@@ -128,6 +179,28 @@ class KrAddrClient:
             "buldSlno": str(building_sub_no),
         }
         return self._get_page("addrCoordApi.do", params, AddressCoordinate.from_api)
+
+    def debug_coordinates(
+        self,
+        *,
+        administrative_code: str,
+        road_name_code: str,
+        underground_yn: str | int,
+        building_main_no: str | int,
+        building_sub_no: str | int = 0,
+    ) -> DebugRun:
+        """좌표 검색 호출을 디버그 실행 결과로 반환한다."""
+
+        from .debug import debug_coordinates
+
+        return debug_coordinates(
+            self,
+            administrative_code=administrative_code,
+            road_name_code=road_name_code,
+            underground_yn=underground_yn,
+            building_main_no=building_main_no,
+            building_sub_no=building_sub_no,
+        )
 
     def detail_addresses(
         self,
@@ -154,6 +227,32 @@ class KrAddrClient:
             "dongNm": dong_name,
         }
         return self._get_page("addrDetailApi.do", params, DetailAddress.from_api)
+
+    def debug_detail_addresses(
+        self,
+        *,
+        administrative_code: str,
+        road_name_code: str,
+        underground_yn: str | int,
+        building_main_no: str | int,
+        building_sub_no: str | int = 0,
+        search_type: str = "dong",
+        dong_name: str | None = None,
+    ) -> DebugRun:
+        """상세주소 검색 호출을 디버그 실행 결과로 반환한다."""
+
+        from .debug import debug_detail_addresses
+
+        return debug_detail_addresses(
+            self,
+            administrative_code=administrative_code,
+            road_name_code=road_name_code,
+            underground_yn=underground_yn,
+            building_main_no=building_main_no,
+            building_sub_no=building_sub_no,
+            search_type=search_type,
+            dong_name=dong_name,
+        )
 
     def iter_search(
         self,
@@ -220,79 +319,37 @@ class KrAddrClient:
         params: Mapping[str, Any],
         parser: Callable[[Mapping[str, Any]], T],
     ) -> JusoPage[T]:
+        exchange = self._request_json(endpoint, params)
+        return parse_page(exchange.body, parser, endpoint=endpoint)
+
+    def _request_json(self, endpoint: str, params: Mapping[str, Any]) -> _ApiExchange:
         request_params: dict[str, Any] = {
             "confmKey": self.confm_key,
             "resultType": "json",
         }
         request_params.update(params)
         url = f"{self.base_url}/{endpoint.strip('/')}"
+        clean_params = without_none(request_params)
         response = self.session.get(
             url,
-            params=without_none(request_params),
+            params=clean_params,
             timeout=self.timeout,
         )
         raise_for_http_error(response, endpoint)
         payload = response_json(response, endpoint)
-        return _parse_page(payload, parser, endpoint=endpoint)
-
-
-def _parse_page(
-    payload: Mapping[str, Any],
-    parser: Callable[[Mapping[str, Any]], T],
-    *,
-    endpoint: str,
-) -> JusoPage[T]:
-    results = payload.get("results", payload)
-    if not isinstance(results, Mapping):
-        raise KrAddrParseError(f"{endpoint}: results가 객체가 아닙니다")
-    common = results.get("common", {})
-    if not isinstance(common, Mapping):
-        raise KrAddrParseError(f"{endpoint}: common이 객체가 아닙니다")
-
-    error_code = str(common.get("errorCode", "0")).strip() or "0"
-    error_message = str(common.get("errorMessage", "")).strip()
-    _raise_for_juso_error(error_code, error_message, endpoint=endpoint)
-
-    rows = _items(results.get("juso"))
-    return JusoPage(
-        items=tuple(parser(row) for row in rows),
-        total_count=_int_value(common.get("totalCount")),
-        current_page=_int_value(common.get("currentPage"), default=1),
-        count_per_page=_int_value(common.get("countPerPage"), default=len(rows) or 10),
-        error_code=error_code,
-        error_message=error_message or "정상",
-        raw=payload,
-    )
-
-
-def _items(value: Any) -> list[Mapping[str, Any]]:
-    if value is None or value == "":
-        return []
-    if isinstance(value, Mapping):
-        return [value]
-    if isinstance(value, list) and all(isinstance(item, Mapping) for item in value):
-        return value
-    raise KrAddrParseError("results.juso가 객체 또는 목록이 아닙니다")
-
-
-def _raise_for_juso_error(code: str, message: str, *, endpoint: str) -> None:
-    if code in {"0", "00", ""}:
-        return
-    text = f"{endpoint}: Juso가 오류 코드 {code}를 반환했습니다: {message}".strip()
-    if code == "-999":
-        raise KrAddrServerError(text)
-    if code in {"E0001", "E0005"}:
-        raise KrAddrAuthError(text)
-    if code in {"E0007", "E0008"}:
-        raise KrAddrRateLimitError(text)
-    raise KrAddrRequestError(text)
-
-
-def _int_value(value: Any, default: int = 0) -> int:
-    try:
-        return int(str(value).strip())
-    except (TypeError, ValueError):
-        return default
+        return _ApiExchange(
+            request={
+                "method": "GET",
+                "url": url,
+                "query": clean_params,
+            },
+            response={
+                "status_code": int(response.status_code),
+                "headers": dict(response.headers or {}),
+                "body": payload,
+            },
+            body=payload,
+        )
 
 
 def _first_env(names: tuple[str, ...]) -> str | None:

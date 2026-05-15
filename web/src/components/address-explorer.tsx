@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import {
   AlertCircle,
   Building2,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -28,6 +29,12 @@ import {
 
 type SearchScope = "all" | "road" | "jibun" | "code";
 type DataMode = "sample" | "postgis";
+type LoadNotice = {
+  kind: "loading" | "success" | "error";
+  message: string;
+  detail: string;
+  id: number;
+};
 
 type KakaoMapPanelProps = {
   places: AddressPlace[];
@@ -42,6 +49,7 @@ type AddressListResponse = {
   page: number;
   page_size: number;
   total: number;
+  total_is_estimate?: boolean;
   has_next: boolean;
 };
 
@@ -50,6 +58,8 @@ const defaultPageSize = 10;
 const pageSizeCookieName = "kraddr_geo_page_size";
 const pageSizeCookieMaxAge = 60 * 60 * 24 * 365;
 const pageSizeOptions = [5, 10, 20, 50, 100] as const;
+const minimumLoadingNoticeMs = 500;
+const searchDebounceMs = 350;
 
 type PageSize = (typeof pageSizeOptions)[number];
 
@@ -75,26 +85,52 @@ const modes: { value: DataMode; label: string; description: string }[] = [
 
 export function AddressExplorer() {
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [scope, setScope] = useState<SearchScope>("all");
   const [mode, setMode] = useState<DataMode>("postgis");
   const [selectedId, setSelectedId] = useState(SAMPLE_PLACES[0].id);
   const [showBoundary, setShowBoundary] = useState(true);
   const [showRadius, setShowRadius] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSizeState] = useState<PageSize>(readPageSizeCookie);
+  const [pageSize, setPageSizeState] = useState<PageSize>(defaultPageSize);
   const [refreshKey, setRefreshKey] = useState(0);
   const [serverItems, setServerItems] = useState<AddressPlace[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
+  const [serverTotalIsEstimate, setServerTotalIsEstimate] = useState(false);
   const [serverHasNext, setServerHasNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [loadNotice, setLoadNotice] = useState<LoadNotice | null>(null);
 
-  const samplePlaces = useMemo(() => filterPlaces(SAMPLE_PLACES, query, scope), [query, scope]);
+  const effectiveQuery = mode === "postgis" ? debouncedQuery : query;
+  const samplePlaces = useMemo(
+    () => filterPlaces(SAMPLE_PLACES, effectiveQuery, scope),
+    [effectiveQuery, scope],
+  );
   const visiblePlaces = mode === "sample" ? samplePlaces : serverItems;
   const selected =
     visiblePlaces.find((place) => place.id === selectedId) ?? visiblePlaces[0] ?? SAMPLE_PLACES[0];
   const totalCount = mode === "sample" ? samplePlaces.length : serverTotal;
+  const totalLabel =
+    mode === "postgis" && serverTotalIsEstimate
+      ? `${totalCount.toLocaleString("ko-KR")}+`
+      : totalCount.toLocaleString("ko-KR");
   const processing = mode === "postgis" && loading;
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setPageSizeState(readPageSizeCookie());
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query);
+      setPage(1);
+    }, searchDebounceMs);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     if (mode !== "postgis") {
@@ -103,11 +139,18 @@ export function AddressExplorer() {
 
     const controller = new AbortController();
     async function loadAddresses() {
+      const startedAt = performance.now();
       setLoading(true);
       setError("");
+      setLoadNotice({
+        kind: "loading",
+        message: "주소 목록 로딩 중",
+        detail: "PostGIS 주소 데이터를 불러오고 있습니다.",
+        id: Date.now(),
+      });
       try {
         const params = new URLSearchParams({
-          query,
+          query: debouncedQuery,
           scope,
           page: String(page),
           page_size: String(pageSize),
@@ -121,15 +164,38 @@ export function AddressExplorer() {
         const payload = (await response.json()) as AddressListResponse;
         setServerItems(payload.items);
         setServerTotal(payload.total);
+        setServerTotalIsEstimate(Boolean(payload.total_is_estimate));
         setServerHasNext(payload.has_next);
+        await waitForMinimumLoadingNotice(startedAt);
+        if (controller.signal.aborted) {
+          return;
+        }
+        setLoadNotice({
+          kind: "success",
+          message: "주소 목록 로딩 완료",
+          detail: `${formatElapsed(performance.now() - startedAt)} 걸렸습니다.`,
+          id: Date.now(),
+        });
       } catch (caught) {
         if (controller.signal.aborted) {
           return;
         }
         setServerItems([]);
         setServerTotal(0);
+        setServerTotalIsEstimate(false);
         setServerHasNext(false);
-        setError(caught instanceof Error ? caught.message : "주소 API를 불러오지 못했습니다.");
+        const message = caught instanceof Error ? caught.message : "주소 API를 불러오지 못했습니다.";
+        await waitForMinimumLoadingNotice(startedAt);
+        if (controller.signal.aborted) {
+          return;
+        }
+        setError(message);
+        setLoadNotice({
+          kind: "error",
+          message: "주소 목록 로딩 실패",
+          detail: message,
+          id: Date.now(),
+        });
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -139,7 +205,18 @@ export function AddressExplorer() {
 
     void loadAddresses();
     return () => controller.abort();
-  }, [mode, page, pageSize, query, refreshKey, scope]);
+  }, [debouncedQuery, mode, page, pageSize, refreshKey, scope]);
+
+  useEffect(() => {
+    if (!loadNotice || loadNotice.kind === "loading") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setLoadNotice((current) => (current?.id === loadNotice.id ? null : current));
+    }, 4500);
+    return () => window.clearTimeout(timer);
+  }, [loadNotice]);
 
   const updateQuery = (value: string) => {
     setQuery(value);
@@ -164,8 +241,9 @@ export function AddressExplorer() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f7f8fb] text-[#182033]">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1480px] flex-col px-4 py-4 sm:px-5 lg:px-6">
+    <main className="min-h-screen bg-[#f7f8fb] text-[#182033] lg:h-screen lg:overflow-hidden">
+      <LoadNoticeToast notice={loadNotice} />
+      <div className="mx-auto flex min-h-screen w-full max-w-[1480px] flex-col px-4 py-4 sm:px-5 lg:h-screen lg:min-h-0 lg:px-6">
         <header className="flex flex-col gap-4 border-b border-[#d9dfeb] pb-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#163b53] text-white shadow-sm">
@@ -230,9 +308,9 @@ export function AddressExplorer() {
           </div>
         </header>
 
-        <section className="grid flex-1 gap-4 py-4 lg:grid-cols-[430px_minmax(0,1fr)]">
-          <aside className="flex min-h-[620px] flex-col gap-4">
-            <div className="rounded-lg border border-[#d9dfeb] bg-white p-4 shadow-sm">
+        <section className="grid min-h-0 flex-1 gap-4 py-4 lg:grid-cols-[430px_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col gap-4">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[#d9dfeb] bg-white p-4 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2 text-sm font-semibold text-[#39485c]">
                   {mode === "postgis" ? (
@@ -252,7 +330,7 @@ export function AddressExplorer() {
                     />
                   ) : null}
                   <span className="font-mono text-sm font-semibold text-[#0f766e]">
-                    {totalCount.toLocaleString("ko-KR")}
+                    {totalLabel}
                   </span>
                 </div>
               </div>
@@ -264,7 +342,7 @@ export function AddressExplorer() {
                 </div>
               ) : null}
 
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {processing ? <LoadingRows count={pageSize} /> : null}
                 {!processing && visiblePlaces.length > 0
                   ? visiblePlaces.map((place) => (
@@ -297,10 +375,12 @@ export function AddressExplorer() {
               ) : null}
             </div>
 
-            <AddressDetail selected={selected} />
+            <div className="shrink-0">
+              <AddressDetail selected={selected} />
+            </div>
           </aside>
 
-          <section className="flex min-h-[620px] flex-col overflow-hidden rounded-lg border border-[#d9dfeb] bg-white shadow-sm">
+          <section className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border border-[#d9dfeb] bg-white shadow-sm lg:min-h-0">
             <div className="flex flex-col gap-3 border-b border-[#d9dfeb] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <LocateFixed aria-hidden="true" size={19} className="text-[#0f766e]" />
@@ -450,14 +530,14 @@ function PageSizeSelect({
   onChange: (value: PageSize) => void;
 }) {
   return (
-    <label className="flex h-9 items-center gap-2 rounded-lg border border-[#d6dee8] bg-white pl-3 pr-2 text-xs font-bold text-[#607086]">
+    <label className="flex h-9 items-center gap-1.5 text-xs font-bold text-[#607086]">
       표시
       <select
         aria-label="페이지당 주소 수"
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(toPageSize(event.target.value))}
-        className="h-7 rounded-md border border-[#d6dee8] bg-[#f8fafc] px-2 font-mono text-xs font-semibold text-[#182033] outline-none transition focus:border-[#2b7a78] focus:ring-2 focus:ring-[#2b7a78]/15 disabled:cursor-not-allowed disabled:opacity-60"
+        className="h-7 border-0 bg-transparent p-0 font-mono text-xs font-semibold text-[#182033] outline-none transition focus:text-[#0f766e] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pageSizeOptions.map((option) => (
           <option key={option} value={option}>
@@ -478,6 +558,50 @@ function LoadingBadge() {
       <LoaderCircle aria-hidden="true" className="animate-spin" size={14} />
       처리 중
     </span>
+  );
+}
+
+function LoadNoticeToast({ notice }: { notice: LoadNotice | null }) {
+  if (!notice) {
+    return null;
+  }
+
+  const isLoading = notice.kind === "loading";
+  const isError = notice.kind === "error";
+  return (
+    <div className="pointer-events-none fixed right-4 top-4 z-50 w-[min(360px,calc(100vw-2rem))]">
+      <div
+        className={`flex items-start gap-3 rounded-lg border bg-white px-4 py-3 shadow-lg ${
+          isError
+            ? "border-[#f3c8bf]"
+            : isLoading
+              ? "border-[#b9d8d3]"
+              : "border-[#bfe3cc]"
+        }`}
+        role="status"
+        aria-live="polite"
+      >
+        {isError ? (
+          <AlertCircle aria-hidden="true" className="mt-0.5 shrink-0 text-[#a33a25]" size={18} />
+        ) : isLoading ? (
+          <LoaderCircle
+            aria-hidden="true"
+            className="mt-0.5 shrink-0 animate-spin text-[#0f766e]"
+            size={18}
+          />
+        ) : (
+          <CheckCircle2
+            aria-hidden="true"
+            className="mt-0.5 shrink-0 text-[#138a4b]"
+            size={18}
+          />
+        )}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#142033]">{notice.message}</p>
+          <p className="mt-1 text-xs font-medium text-[#607086]">{notice.detail}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -625,6 +749,21 @@ function writePageSizeCookie(value: PageSize) {
 function toPageSize(value: string): PageSize {
   const parsed = Number(value);
   return pageSizeOptions.some((option) => option === parsed) ? (parsed as PageSize) : defaultPageSize;
+}
+
+function formatElapsed(milliseconds: number) {
+  if (milliseconds < 1000) {
+    return `${Math.max(1, Math.round(milliseconds))}ms`;
+  }
+  return `${(milliseconds / 1000).toFixed(2)}초`;
+}
+
+function waitForMinimumLoadingNotice(startedAt: number) {
+  const remaining = minimumLoadingNoticeMs - (performance.now() - startedAt);
+  if (remaining <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
 }
 
 function filterPlaces(places: AddressPlace[], query: string, scope: SearchScope) {

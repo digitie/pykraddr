@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import zipfile
 
+from sqlalchemy import text
+
 from kraddr.geo import RoadNameAddressStore
 
 
@@ -147,3 +149,59 @@ def test_store_daily_update_upserts_existing_row(tmp_path) -> None:
 
         assert row is not None
         assert row["building_register_name"] == "수정빌딩"
+
+
+def test_store_backfills_derived_columns_for_existing_rows(tmp_path) -> None:
+    full_path = tmp_path / "RNADDR_KOR_2601.zip"
+    full_path.write_bytes(_road_and_jibun_archive([_road_line("31")], [_jibun_line("31")]))
+
+    with RoadNameAddressStore(tmp_path / "addr.sqlite") as store:
+        store.load_full_archive(full_path)
+        with store.engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    update road_name_addresses
+                    set building_management_number = '',
+                        sido_code = '',
+                        sigungu_code = '',
+                        eup_myeon_dong_code = '',
+                        ri_code = '',
+                        road_sigungu_code = '',
+                        road_number = '',
+                        pnu = ''
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    update related_jibuns
+                    set sido_code = '',
+                        sigungu_code = '',
+                        eup_myeon_dong_code = '',
+                        ri_code = '',
+                        road_sigungu_code = '',
+                        road_number = '',
+                        pnu = ''
+                    """
+                )
+            )
+
+        store.backfill_derived_columns()
+
+        row = store.get_road_address(
+            (
+                "1111010100100010000000001",
+                "111102005001",
+                "0",
+                "1",
+                "0",
+            )
+        )
+        related_rows = store.find_related_jibuns_by_pnu("1111010100000010000")
+
+        assert row is not None
+        assert row["building_management_number"] == "1111010100100010000000001"
+        assert row["pnu"] == "1111010100000010000"
+        assert related_rows[0]["road_address_management_number"] == "1111010100100010000000001"

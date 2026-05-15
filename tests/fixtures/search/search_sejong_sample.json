@@ -1,0 +1,123 @@
+{
+  "name": "search_sejong_sample",
+  "function": "search",
+  "description": "도로명주소 검색 replay 샘플",
+  "input": {
+    "keyword": "세종대로 110",
+    "current_page": 1,
+    "count_per_page": 10,
+    "history": null,
+    "first_sort": "road",
+    "add_info": true
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://business.juso.go.kr/addrlink/addrLinkApi.do",
+    "query": {
+      "confmKey": "<REDACTED>",
+      "resultType": "json",
+      "currentPage": 1,
+      "countPerPage": 10,
+      "keyword": "세종대로 110",
+      "firstSort": "road",
+      "addInfoYn": "Y"
+    }
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "results": {
+        "common": {
+          "totalCount": "1",
+          "currentPage": "1",
+          "countPerPage": "10",
+          "errorCode": "0",
+          "errorMessage": "정상"
+        },
+        "juso": [
+          {
+            "roadAddr": "서울특별시 중구 세종대로 110",
+            "roadAddrPart1": "서울특별시 중구 세종대로 110",
+            "roadAddrPart2": "",
+            "jibunAddr": "서울특별시 중구 태평로1가 31",
+            "engAddr": "110, Sejong-daero, Jung-gu, Seoul",
+            "zipNo": "04524",
+            "admCd": "1114010300",
+            "rnMgtSn": "111402005001",
+            "bdMgtSn": "1114010300100310000000001",
+            "rn": "세종대로",
+            "bdNm": "서울특별시청",
+            "siNm": "서울특별시",
+            "sggNm": "중구",
+            "emdNm": "태평로1가",
+            "liNm": "",
+            "udrtYn": "0",
+            "buldMnnm": "110",
+            "buldSlno": "0",
+            "mtYn": "0",
+            "lnbrMnnm": "31",
+            "lnbrSlno": "0",
+            "emdNo": "01",
+            "hstryYn": "N",
+            "relJibun": "",
+            "hemdNm": "명동"
+          }
+        ]
+      }
+    }
+  },
+  "parsed": {},
+  "processed": {
+    "total_count": 1,
+    "current_page": 1,
+    "count_per_page": 10,
+    "error_code": "0",
+    "error_message": "정상",
+    "items": [
+      {
+        "road_address": "서울특별시 중구 세종대로 110",
+        "road_address_part1": "서울특별시 중구 세종대로 110",
+        "road_address_part2": null,
+        "jibun_address": "서울특별시 중구 태평로1가 31",
+        "english_address": "110, Sejong-daero, Jung-gu, Seoul",
+        "zip_code": "04524",
+        "administrative_code": "1114010300",
+        "road_name_code": "111402005001",
+        "building_management_number": "1114010300100310000000001",
+        "road_name": "세종대로",
+        "building_name": "서울특별시청",
+        "sido_name": "서울특별시",
+        "sigungu_name": "중구",
+        "eup_myeon_dong_name": "태평로1가",
+        "legal_ri_name": null,
+        "underground_yn": "0",
+        "building_main_no": 110,
+        "building_sub_no": 0,
+        "mountain_yn": "0",
+        "lot_main_no": 31,
+        "lot_sub_no": 0,
+        "eup_myeon_dong_serial_no": "01",
+        "history_yn": "N",
+        "related_jibun": null,
+        "administrative_dong_name": "명동"
+      }
+    ]
+  },
+  "assertion": {
+    "mode": "snapshot",
+    "exclude_fields": [
+      "fetched_at",
+      "request_id",
+      "updated_at"
+    ],
+    "required_fields": []
+  },
+  "meta": {
+    "created_at": "2026-05-15T20:30:00+09:00",
+    "library_version": "0.1.0",
+    "source": "debug_ui"
+  }
+}

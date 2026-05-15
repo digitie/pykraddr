@@ -1,6 +1,12 @@
-# python-kraddr-geo 백엔드
+# python-kraddr-geo React 로컬 어댑터
 
-`backend` 디렉터리는 주소 목록 브라우징과 GIS 경계 조회를 위한 FastAPI 서버입니다. 기본 기준은 PostgreSQL + PostGIS + SQLAlchemy 2 + GeoAlchemy2이며, 경계 GeoJSON을 화면용 좌표로 정리할 때 Shapely를 사용합니다. GeoPandas는 같은 GIS 처리 스택의 필수 의존성으로 설치하고 상태 점검에서 버전을 확인합니다.
+`backend` 디렉터리는 React 웹 UI를 로컬에서 확인하기 위한 선택 어댑터입니다. 이
+저장소의 외부 사용 방식은 REST API 서버가 아니라 `kraddr.geo` Python
+라이브러리를 import하는 것입니다.
+
+어댑터의 기본 기준은 PostgreSQL + PostGIS + SQLAlchemy 2 + GeoAlchemy2이며, 경계
+GeoJSON을 화면용 좌표로 정리할 때 Shapely를 사용합니다. GeoPandas는 같은 GIS 처리
+스택의 필수 의존성으로 설치하고 상태 점검에서 버전을 확인합니다.
 
 ## 실행 포트
 
