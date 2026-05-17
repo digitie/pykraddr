@@ -148,6 +148,7 @@ def test_spatialite_store_prioritizes_location_summary_and_indexes(tmp_path) -> 
     with SpatialiteAddressStore(tmp_path / "kraddr_geo.sqlite", load_spatialite=False) as store:
         summary_result = store.load_location_summary_records(summary, source="summary-fixture")
         navigation_result = store.load_navigation_building_records(navigation, source="nav-fixture")
+        store.rebuild_search_index()
         candidates = store.get_coord(
             VWorldLikeGeocodeRequest(
                 rnMgtSn="111103100012",
@@ -220,6 +221,32 @@ def test_spatialite_store_prioritizes_location_summary_and_indexes(tmp_path) -> 
                 LIMIT 10
                 """,
             )
+            road_name_plan = _query_plan(
+                connection,
+                """
+                EXPLAIN QUERY PLAN
+                SELECT rowid
+                FROM juso_address_points
+                WHERE road_name >= 'Jahamun-ro'
+                  AND road_name < 'Jahamun-rp'
+                LIMIT 10
+                """,
+            )
+            fts_rows = connection.exec_driver_sql(
+                """
+                SELECT rowid
+                FROM juso_address_fts
+                WHERE juso_address_fts MATCH ?
+                """,
+                ('"Jahamun"',),
+            ).all()
+            search_index_ready = connection.exec_driver_sql(
+                """
+                SELECT value
+                FROM juso_spatial_metadata
+                WHERE key = 'address_search_index_ready'
+                """
+            ).scalar()
 
     assert summary_result.loaded == 1
     assert navigation_result.loaded == 2
@@ -234,10 +261,16 @@ def test_spatialite_store_prioritizes_location_summary_and_indexes(tmp_path) -> 
     assert "ix_juso_points_postal_code" in index_names
     assert "ix_juso_points_listing_order" in index_names
     assert "ix_juso_points_postal_lookup" in index_names
+    assert "ix_juso_points_road_name" in index_names
+    assert "ix_juso_points_parcel_address" in index_names
+    assert "ix_juso_points_building_name" in index_names
     assert "ix_juso_points_road_lookup" in road_plan
     assert "ix_juso_points_postal_code" in postal_plan
     assert "ix_juso_points_xy" in xy_plan
     assert "ix_juso_points_listing_order" in listing_plan
+    assert "ix_juso_points_road_name" in road_name_plan
+    assert len(fts_rows) >= 1
+    assert search_index_ready == "fts5_trigram"
 
 
 def test_spatialite_store_validates_krmois_probe(tmp_path) -> None:

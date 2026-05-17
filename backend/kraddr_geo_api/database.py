@@ -65,28 +65,45 @@ def list_addresses(
     normalized_page = max(page, 1)
     normalized_page_size = max(1, min(page_size, 100))
     offset = (normalized_page - 1) * normalized_page_size
-    where_sql, params = _where_clause(query=query, scope=scope)
-    params.update({"limit": normalized_page_size, "offset": offset})
-    items_sql = sa.text(
-        f"""
-        select *
-        from juso_address_points
-        where {where_sql}
-        order by source_priority, road_name_code, building_main_no, building_sub_no, point_id
-        limit :limit offset :offset
-        """
-    )
-    count_sql = sa.text(f"select count(*) from juso_address_points where {where_sql}")
     current = store()
     with current.engine.connect() as connection:
-        rows = connection.execute(items_sql, params).mappings().all()
-        total = int(connection.scalar(count_sql, params) or 0)
+        if query.strip():
+            rows, total, has_next = _search_address_rows(
+                connection,
+                query=query,
+                scope=scope,
+                page_size=normalized_page_size,
+                offset=offset,
+            )
+        else:
+            params = {"limit": normalized_page_size + 1, "offset": offset}
+            rows = connection.execute(
+                sa.text(
+                    """
+                    select *
+                    from juso_address_points
+                    order by
+                        source_priority,
+                        road_name_code,
+                        building_main_no,
+                        building_sub_no,
+                        point_id
+                    limit :limit offset :offset
+                    """
+                ),
+                params,
+            ).mappings().all()
+            has_next = len(rows) > normalized_page_size
+            rows = rows[:normalized_page_size]
+            total = int(
+                connection.scalar(sa.text("select count(*) from juso_address_points")) or 0
+            )
     return {
         "items": [_row_to_address(row) for row in rows],
         "page": normalized_page,
         "page_size": normalized_page_size,
         "total": total,
-        "has_next": offset + normalized_page_size < total,
+        "has_next": has_next,
     }
 
 
@@ -145,59 +162,189 @@ def lookup_postal_code(zipcode: str, *, limit: int = 100, offset: int = 0) -> di
     }
 
 
-def _where_clause(*, query: str, scope: str) -> tuple[str, dict[str, Any]]:
-    conditions = ["1 = 1"]
-    params: dict[str, Any] = {}
+_SEARCH_INDEXES = {
+    "road_name": "ix_juso_points_road_name",
+    "road_address": "ix_juso_points_road_address",
+    "parcel_address": "ix_juso_points_parcel_address",
+    "building_name": "ix_juso_points_building_name",
+    "legal_dong_code": "ix_juso_points_legal_dong",
+    "road_name_code": "ix_juso_points_road_lookup",
+    "building_management_number": "ix_juso_points_building_mgmt",
+    "postal_code": "ix_juso_points_postal_lookup",
+}
+
+_SEARCH_COLUMNS_BY_SCOPE = {
+    "road": ("road_name", "road_address"),
+    "jibun": ("parcel_address", "legal_dong_code"),
+    "code": (
+        "legal_dong_code",
+        "road_name_code",
+        "building_management_number",
+        "postal_code",
+    ),
+    "all": (
+        "road_name",
+        "road_address",
+        "parcel_address",
+        "building_name",
+        "legal_dong_code",
+        "road_name_code",
+        "building_management_number",
+        "postal_code",
+    ),
+}
+_FTS_COLUMNS_BY_SCOPE = {
+    "road": ("road_name", "road_address"),
+    "jibun": ("parcel_address",),
+    "all": ("road_name", "road_address", "parcel_address", "building_name"),
+}
+_FTS_MIN_QUERY_LENGTH = 3
+
+
+def _search_address_rows(
+    connection: sa.Connection,
+    *,
+    query: str,
+    scope: str,
+    page_size: int,
+    offset: int,
+) -> tuple[list[sa.RowMapping], int, bool]:
     value = query.strip()
-    if not value:
-        return " and ".join(conditions), params
-    like = f"%{_escape_like(value.lower())}%"
-    prefix = f"{_escape_like(value)}%"
-    params.update({"like": like, "prefix": prefix})
-    if scope == "road":
-        conditions.append(
-            """
-            (
-                lower(coalesce(road_address, '')) like :like escape '\\'
-                or lower(coalesce(road_name, '')) like :like escape '\\'
+    if (
+        scope in _FTS_COLUMNS_BY_SCOPE
+        and len(value) >= _FTS_MIN_QUERY_LENGTH
+        and _has_ready_fts_index(connection)
+    ):
+        fts_rows, fts_total, fts_has_next = _search_address_rows_fts(
+            connection,
+            query=value,
+            scope=scope,
+            page_size=page_size,
+            offset=offset,
+        )
+        if fts_rows:
+            return fts_rows, fts_total, fts_has_next
+
+    prefix_end = _prefix_end(value)
+    columns = _SEARCH_COLUMNS_BY_SCOPE.get(scope, _SEARCH_COLUMNS_BY_SCOPE["all"])
+    rowid_queries = [
+        f"""
+        select rowid
+        from juso_address_points indexed by {_SEARCH_INDEXES[column]}
+        where {column} >= :prefix_start and {column} < :prefix_end
+        """
+        for column in columns
+    ]
+    rows = connection.execute(
+        sa.text(
+            f"""
+            with candidate_rowids(rowid) as (
+                {" union ".join(rowid_queries)}
             )
+            select p.*
+            from juso_address_points as p
+            join candidate_rowids as c on p.rowid = c.rowid
+            order by
+                p.source_priority,
+                p.road_name_code,
+                p.building_main_no,
+                p.building_sub_no,
+                p.point_id
+            limit :limit offset :offset
+            """
+        ),
+        {
+            "prefix_start": value,
+            "prefix_end": prefix_end,
+            "limit": page_size + 1,
+            "offset": offset,
+        },
+    ).mappings().all()
+    has_next = len(rows) > page_size
+    rows = rows[:page_size]
+    total = offset + len(rows) + (1 if has_next else 0)
+    return list(rows), total, has_next
+
+
+def _search_address_rows_fts(
+    connection: sa.Connection,
+    *,
+    query: str,
+    scope: str,
+    page_size: int,
+    offset: int,
+) -> tuple[list[sa.RowMapping], int, bool]:
+    match_query = _fts_match_query(query, scope=scope)
+    rows = connection.execute(
+        sa.text(
+            """
+            with candidate_rowids(rowid) as (
+                select rowid
+                from juso_address_fts
+                where juso_address_fts match :match_query
+            )
+            select p.*
+            from juso_address_points as p
+            join candidate_rowids as c on p.rowid = c.rowid
+            order by
+                p.source_priority,
+                p.road_name_code,
+                p.building_main_no,
+                p.building_sub_no,
+                p.point_id
+            limit :limit offset :offset
+            """
+        ),
+        {"match_query": match_query, "limit": page_size + 1, "offset": offset},
+    ).mappings().all()
+    total = int(
+        connection.scalar(
+            sa.text(
+                """
+                select count(*)
+                from juso_address_fts
+                where juso_address_fts match :match_query
+                """
+            ),
+            {"match_query": match_query},
+        )
+        or 0
+    )
+    has_next = offset + page_size < total
+    rows = rows[:page_size]
+    return list(rows), total, has_next
+
+
+def _has_ready_fts_index(connection: sa.Connection) -> bool:
+    exists = connection.scalar(
+        sa.text("select 1 from sqlite_master where type = 'table' and name = 'juso_address_fts'")
+    )
+    if not exists:
+        return False
+    ready = connection.scalar(
+        sa.text(
+            """
+            select 1
+            from juso_spatial_metadata
+            where key = 'address_search_index_ready'
+            limit 1
             """
         )
-    elif scope == "jibun":
-        conditions.append(
-            """
-            (
-                lower(coalesce(parcel_address, '')) like :like escape '\\'
-                or coalesce(legal_dong_code, '') like :prefix escape '\\'
-            )
-            """
-        )
-    elif scope == "code":
-        conditions.append(
-            """
-            (
-                coalesce(legal_dong_code, '') like :prefix escape '\\'
-                or coalesce(road_name_code, '') like :prefix escape '\\'
-                or coalesce(building_management_number, '') like :prefix escape '\\'
-                or coalesce(postal_code, '') like :prefix escape '\\'
-            )
-            """
-        )
-    else:
-        conditions.append(
-            """
-            (
-                lower(coalesce(road_address, '')) like :like escape '\\'
-                or lower(coalesce(parcel_address, '')) like :like escape '\\'
-                or lower(coalesce(building_name, '')) like :like escape '\\'
-                or coalesce(legal_dong_code, '') like :prefix escape '\\'
-                or coalesce(road_name_code, '') like :prefix escape '\\'
-                or coalesce(building_management_number, '') like :prefix escape '\\'
-                or coalesce(postal_code, '') like :prefix escape '\\'
-            )
-            """
-        )
-    return " and ".join(conditions), params
+    )
+    return bool(ready)
+
+
+def _fts_match_query(query: str, *, scope: str) -> str:
+    escaped = query.replace('"', '""')
+    phrase = f'"{escaped}"'
+    columns = _FTS_COLUMNS_BY_SCOPE.get(scope)
+    if not columns:
+        return phrase
+    return f"{{{' '.join(columns)}}} : {phrase}"
+
+
+def _prefix_end(value: str) -> str:
+    return f"{value[:-1]}{chr(ord(value[-1]) + 1)}"
 
 
 def _row_to_address(row: sa.RowMapping) -> dict[str, Any]:
@@ -229,13 +376,15 @@ def _row_to_address(row: sa.RowMapping) -> dict[str, Any]:
 
 def _to_wgs84(x: Any, y: Any) -> tuple[float, float]:
     try:
-        from pyproj import Transformer
+        transformer = _wgs84_transformer()
     except ImportError:
         return float(x), float(y)
-    transformer = Transformer.from_crs("EPSG:5179", "EPSG:4326", always_xy=True)
     lon, lat = transformer.transform(float(x), float(y))
     return float(lon), float(lat)
 
 
-def _escape_like(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+@lru_cache(maxsize=1)
+def _wgs84_transformer() -> Any:
+    from pyproj import Transformer
+
+    return Transformer.from_crs("EPSG:5179", "EPSG:4326", always_xy=True)

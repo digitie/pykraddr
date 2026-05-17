@@ -70,6 +70,7 @@ def upgrade() -> None:
         "juso_address_points",
         ["road_name_code", "underground_yn", "building_main_no", "building_sub_no"],
     )
+    op.create_index("ix_juso_points_road_name", "juso_address_points", ["road_name"])
     op.create_index("ix_juso_points_postal_code", "juso_address_points", ["postal_code"])
     op.create_index(
         "ix_juso_points_postal_lookup",
@@ -95,6 +96,8 @@ def upgrade() -> None:
     )
     op.create_index("ix_juso_points_xy", "juso_address_points", ["x", "y"])
     op.create_index("ix_juso_points_road_address", "juso_address_points", ["road_address"])
+    op.create_index("ix_juso_points_parcel_address", "juso_address_points", ["parcel_address"])
+    op.create_index("ix_juso_points_building_name", "juso_address_points", ["building_name"])
 
     op.create_table(
         "juso_boundary_polygons",
@@ -134,9 +137,89 @@ def upgrade() -> None:
         sa.Column("value", sa.String(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
+    op.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS juso_address_fts
+        USING fts5(
+            road_name,
+            road_address,
+            parcel_address,
+            building_name,
+            content='juso_address_points',
+            content_rowid='rowid',
+            tokenize='trigram'
+        )
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS juso_address_points_fts_ai
+        AFTER INSERT ON juso_address_points
+        BEGIN
+            INSERT INTO juso_address_fts
+                (rowid, road_name, road_address, parcel_address, building_name)
+            VALUES (
+                new.rowid,
+                new.road_name,
+                new.road_address,
+                new.parcel_address,
+                new.building_name
+            );
+        END
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS juso_address_points_fts_ad
+        AFTER DELETE ON juso_address_points
+        BEGIN
+            INSERT INTO juso_address_fts
+                (juso_address_fts, rowid, road_name, road_address, parcel_address, building_name)
+            VALUES (
+                'delete',
+                old.rowid,
+                old.road_name,
+                old.road_address,
+                old.parcel_address,
+                old.building_name
+            );
+        END
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS juso_address_points_fts_au
+        AFTER UPDATE ON juso_address_points
+        BEGIN
+            INSERT INTO juso_address_fts
+                (juso_address_fts, rowid, road_name, road_address, parcel_address, building_name)
+            VALUES (
+                'delete',
+                old.rowid,
+                old.road_name,
+                old.road_address,
+                old.parcel_address,
+                old.building_name
+            );
+            INSERT INTO juso_address_fts
+                (rowid, road_name, road_address, parcel_address, building_name)
+            VALUES (
+                new.rowid,
+                new.road_name,
+                new.road_address,
+                new.parcel_address,
+                new.building_name
+            );
+        END
+        """
+    )
 
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS juso_address_points_fts_au")
+    op.execute("DROP TRIGGER IF EXISTS juso_address_points_fts_ad")
+    op.execute("DROP TRIGGER IF EXISTS juso_address_points_fts_ai")
+    op.execute("DROP TABLE IF EXISTS juso_address_fts")
     for index_name in _POINT_INDEXES:
         op.drop_index(index_name, table_name="juso_address_points")
     for index_name in _BOUNDARY_INDEXES:
@@ -153,11 +236,14 @@ _POINT_INDEXES: Sequence[str] = (
     "ix_juso_points_building_mgmt",
     "ix_juso_points_legal_dong",
     "ix_juso_points_road_lookup",
+    "ix_juso_points_road_name",
     "ix_juso_points_postal_code",
     "ix_juso_points_postal_lookup",
     "ix_juso_points_listing_order",
     "ix_juso_points_xy",
     "ix_juso_points_road_address",
+    "ix_juso_points_parcel_address",
+    "ix_juso_points_building_name",
 )
 _BOUNDARY_INDEXES: Sequence[str] = (
     "ix_juso_boundaries_legal_code",

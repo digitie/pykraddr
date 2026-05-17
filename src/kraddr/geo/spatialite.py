@@ -53,9 +53,11 @@ from .reverse import (
 )
 
 SPATIALITE_ADDRESS_POINT_TABLE = "juso_address_points"
+SPATIALITE_ADDRESS_SEARCH_TABLE = "juso_address_fts"
 SPATIALITE_BOUNDARY_TABLE = "juso_boundary_polygons"
 SPATIALITE_METADATA_TABLE = "juso_spatial_metadata"
 DEFAULT_SRID = 5179
+SEARCH_INDEX_READY_METADATA_KEY = "address_search_index_ready"
 
 LOCATION_SUMMARY_ENTRANCE_COLUMNS = (
     "sigungu_code",
@@ -264,6 +266,7 @@ class SpatialiteAddressStore:
             if self.engine.dialect.name == "sqlite":
                 _set_sqlite_pragmas(connection)
                 _ensure_sqlite_performance_indexes(connection)
+                _ensure_sqlite_search_index(connection)
                 if load_spatialite:
                     self.spatialite_enabled = _try_enable_spatialite(connection, self.srid)
                     if self.spatialite_enabled:
@@ -486,6 +489,22 @@ class SpatialiteAddressStore:
     def count_points(self) -> int:
         with self.engine.connect() as connection:
             return int(connection.scalar(select(func.count()).select_from(self.point_table)) or 0)
+
+    def rebuild_search_index(self) -> None:
+        """Build the trigram search index for fast contains-style address search."""
+
+        with self.engine.begin() as connection:
+            _ensure_sqlite_search_index(connection)
+            connection.execute(
+                text(
+                    f"""
+                    INSERT INTO {SPATIALITE_ADDRESS_SEARCH_TABLE}
+                        ({SPATIALITE_ADDRESS_SEARCH_TABLE})
+                    VALUES ('rebuild')
+                    """
+                )
+            )
+            _mark_search_index_ready(connection)
 
     def get_coord(
         self,
@@ -800,6 +819,7 @@ def make_spatialite_metadata() -> MetaData:
         ),
         Index("ix_juso_points_building_mgmt", "building_management_number"),
         Index("ix_juso_points_legal_dong", "legal_dong_code"),
+        Index("ix_juso_points_road_name", "road_name"),
         Index(
             "ix_juso_points_road_lookup",
             "road_name_code",
@@ -818,6 +838,8 @@ def make_spatialite_metadata() -> MetaData:
         ),
         Index("ix_juso_points_xy", "x", "y"),
         Index("ix_juso_points_road_address", "road_address"),
+        Index("ix_juso_points_parcel_address", "parcel_address"),
+        Index("ix_juso_points_building_name", "building_name"),
     )
     Table(
         SPATIALITE_BOUNDARY_TABLE,
@@ -1434,8 +1456,136 @@ def _ensure_sqlite_performance_indexes(connection: Any) -> None:
         ON {SPATIALITE_ADDRESS_POINT_TABLE}
         (postal_code, road_name_code, building_main_no, building_sub_no, source_priority)
         """,
+        f"""
+        CREATE INDEX IF NOT EXISTS ix_juso_points_road_name
+        ON {SPATIALITE_ADDRESS_POINT_TABLE} (road_name)
+        """,
+        f"""
+        CREATE INDEX IF NOT EXISTS ix_juso_points_parcel_address
+        ON {SPATIALITE_ADDRESS_POINT_TABLE} (parcel_address)
+        """,
+        f"""
+        CREATE INDEX IF NOT EXISTS ix_juso_points_building_name
+        ON {SPATIALITE_ADDRESS_POINT_TABLE} (building_name)
+        """,
     ):
         connection.execute(text(sql))
+
+
+def _ensure_sqlite_search_index(connection: Any) -> None:
+    connection.execute(
+        text(
+            f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS {SPATIALITE_ADDRESS_SEARCH_TABLE}
+            USING fts5(
+                road_name,
+                road_address,
+                parcel_address,
+                building_name,
+                content='{SPATIALITE_ADDRESS_POINT_TABLE}',
+                content_rowid='rowid',
+                tokenize='trigram'
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS juso_address_points_fts_ai
+            AFTER INSERT ON {SPATIALITE_ADDRESS_POINT_TABLE}
+            BEGIN
+                INSERT INTO {SPATIALITE_ADDRESS_SEARCH_TABLE}
+                    (rowid, road_name, road_address, parcel_address, building_name)
+                VALUES (
+                    new.rowid,
+                    new.road_name,
+                    new.road_address,
+                    new.parcel_address,
+                    new.building_name
+                );
+            END
+            """
+        )
+    )
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS juso_address_points_fts_ad
+            AFTER DELETE ON {SPATIALITE_ADDRESS_POINT_TABLE}
+            BEGIN
+                INSERT INTO {SPATIALITE_ADDRESS_SEARCH_TABLE}
+                    (
+                        {SPATIALITE_ADDRESS_SEARCH_TABLE},
+                        rowid,
+                        road_name,
+                        road_address,
+                        parcel_address,
+                        building_name
+                    )
+                VALUES (
+                    'delete',
+                    old.rowid,
+                    old.road_name,
+                    old.road_address,
+                    old.parcel_address,
+                    old.building_name
+                );
+            END
+            """
+        )
+    )
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS juso_address_points_fts_au
+            AFTER UPDATE ON {SPATIALITE_ADDRESS_POINT_TABLE}
+            BEGIN
+                INSERT INTO {SPATIALITE_ADDRESS_SEARCH_TABLE}
+                    (
+                        {SPATIALITE_ADDRESS_SEARCH_TABLE},
+                        rowid,
+                        road_name,
+                        road_address,
+                        parcel_address,
+                        building_name
+                    )
+                VALUES (
+                    'delete',
+                    old.rowid,
+                    old.road_name,
+                    old.road_address,
+                    old.parcel_address,
+                    old.building_name
+                );
+                INSERT INTO {SPATIALITE_ADDRESS_SEARCH_TABLE}
+                    (rowid, road_name, road_address, parcel_address, building_name)
+                VALUES (
+                    new.rowid,
+                    new.road_name,
+                    new.road_address,
+                    new.parcel_address,
+                    new.building_name
+                );
+            END
+            """
+        )
+    )
+
+
+def _mark_search_index_ready(connection: Any) -> None:
+    connection.execute(
+        text(
+            f"""
+            INSERT INTO {SPATIALITE_METADATA_TABLE} (key, value, updated_at)
+            VALUES (:key, :value, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """
+        ),
+        {"key": SEARCH_INDEX_READY_METADATA_KEY, "value": "fts5_trigram"},
+    )
 
 
 def _try_enable_spatialite(connection: Any, srid: int) -> bool:
